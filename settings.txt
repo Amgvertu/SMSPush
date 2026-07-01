@@ -1,0 +1,189 @@
+========= app/build.gradle.kts =======
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "com.example.smsgateway"
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = "com.example.smsgateway"
+        minSdk = 21
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("com.google.android.material:material:1.11.0")
+
+    // Stomp клиент
+    implementation("com.github.NaikSoftware:StompProtocolAndroid:1.6.6")
+    // OkHttp (Stomp уже включает, но для явности)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Gson
+    implementation("com.google.code.gson:gson:2.10.1")
+    // Coroutines (опционально)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+}
+
+========= app/src/main/AndroidManifest.xml =======
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" /> <!-- для Android 13+ -->
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="SMS Gateway"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.Light">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".SmsGatewayService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>
+
+========= build.gradle.kts =======
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+plugins {
+    id("com.android.application") version "8.2.0" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.22" apply false
+}
+
+========= gradle.properties =======
+# Project-wide Gradle settings.
+# IDE (e.g. Android Studio) users:
+# Gradle settings configured through the IDE *will override*
+# any settings specified in this file.
+# For more details on how to configure your build environment visit
+# http://www.gradle.org/docs/current/userguide/build_environment.html
+# Specifies the JVM arguments used for the daemon process.
+# The setting is particularly useful for tweaking memory settings.
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+# When configured, Gradle will run in incubating parallel mode.
+# This option should only be used with decoupled projects. For more details, visit
+# https://developer.android.com/r/tools/gradle-multi-project-decoupled-projects
+# org.gradle.parallel=true
+# Kotlin code style for this project: "official" or "obsolete":
+kotlin.code.style=official
+
+========= gradle/libs.versions.toml =======
+[versions]
+agp = "9.1.1"
+coreKtx = "1.19.0"
+junit = "4.13.2"
+junitVersion = "1.3.0"
+espressoCore = "3.7.0"
+appcompat = "1.7.1"
+material = "1.14.0"
+
+[libraries]
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
+androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+
+
+========= gradle/wrapper/gradle-wrapper.properties =======
+#Wed Jul 01 00:52:31 NOVT 2026
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionSha256Sum=b266d5ff6b90eada6dc3b20cb090e3731302e553a27c5d3e4df1f0d76beaff06
+distributionUrl=https\://services.gradle.org/distributions/gradle-9.3.1-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+
+========= local.properties =======
+## This file is automatically generated by Android Studio.
+# Do not modify this file -- YOUR CHANGES WILL BE ERASED!
+#
+# This file should *NOT* be checked into Version Control Systems,
+# as it contains information specific to your local configuration.
+#
+# Location of the SDK. This is only used by Gradle.
+# For customization when using a Version Control System, please read the
+# header note.
+sdk.dir=C\:\\Users\\prora\\AppData\\Local\\Android\\Sdk
+
+========= settings.gradle.kts =======
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "SMSPush"
+include(":app")
+ 
+

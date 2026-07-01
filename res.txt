@@ -1,0 +1,332 @@
+========= app/src/main/res/drawable/ic_launcher_background.xml =======
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M9,0L9,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,0L19,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,0L29,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,0L39,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,0L49,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,0L59,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,0L69,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,0L79,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M89,0L89,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M99,0L99,108"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,9L108,9"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,19L108,19"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,29L108,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,39L108,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,49L108,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,59L108,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,69L108,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,79L108,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,89L108,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,99L108,99"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,29L89,29"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,39L89,39"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,49L89,49"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,59L89,59"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,69L89,69"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M19,79L89,79"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M29,19L29,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39,19L39,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M49,19L49,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M59,19L59,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M69,19L69,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M79,19L79,89"
+        android:strokeWidth="0.8"
+        android:strokeColor="#33FFFFFF" />
+</vector>
+
+========= app/src/main/res/drawable/ic_launcher_foreground.xml =======
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="85.84757"
+                android:endY="92.4963"
+                android:startX="42.9492"
+                android:startY="49.59793"
+                android:type="linear">
+                <item
+                    android:color="#44000000"
+                    android:offset="0.0" />
+                <item
+                    android:color="#00000000"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="nonZero"
+        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
+        android:strokeWidth="1"
+        android:strokeColor="#00000000" />
+</vector>
+
+========= app/src/main/res/layout/activity_main.xml =======
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <Button
+        android:id="@+id/btnStart"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Запустить шлюз" />
+
+    <Button
+        android:id="@+id/btnStop"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Остановить шлюз" />
+
+</LinearLayout>
+
+========= app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml =======
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+
+========= app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml =======
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+
+========= app/src/main/res/values-night/themes.xml =======
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.SMSPush" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">@color/purple_200</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/teal_200</item>
+        <item name="colorSecondaryVariant">@color/teal_200</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <!-- Status bar color. -->
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+        <!-- Customize your theme here. -->
+    </style>
+</resources>
+
+========= app/src/main/res/values/colors.xml =======
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
+
+========= app/src/main/res/values/strings.xml =======
+<resources>
+    <string name="app_name">SMSPush</string>
+</resources>
+
+========= app/src/main/res/values/themes.xml =======
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.SMSPush" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/teal_200</item>
+        <item name="colorSecondaryVariant">@color/teal_700</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <!-- Status bar color. -->
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+        <!-- Customize your theme here. -->
+    </style>
+</resources>
+
+========= app/src/main/res/xml/backup_rules.xml =======
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample backup rules file; uncomment and customize as necessary.
+   See https://developer.android.com/guide/topics/data/autobackup
+   for details.
+   Note: This file is ignored for devices older than API 31
+   See https://developer.android.com/about/versions/12/backup-restore
+-->
+<full-backup-content>
+    <!--
+   <include domain="sharedpref" path="."/>
+   <exclude domain="sharedpref" path="device.xml"/>
+-->
+</full-backup-content>
+
+========= app/src/main/res/xml/data_extraction_rules.xml =======
+<?xml version="1.0" encoding="utf-8"?><!--
+   Sample data extraction rules file; uncomment and customize as necessary.
+   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
+   for details.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- TODO: Use <include> and <exclude> to control what is backed up.
+        <include .../>
+        <exclude .../>
+        -->
+    </cloud-backup>
+    <!--
+    <device-transfer>
+        <include .../>
+        <exclude .../>
+    </device-transfer>
+    -->
+</data-extraction-rules>
+
