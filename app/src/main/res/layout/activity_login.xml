@@ -11,6 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Логин"
+        android:text="+79999999999"
         android:inputType="text" />
 
     <EditText
@@ -19,6 +20,7 @@
         android:layout_height="wrap_content"
         android:hint="Пароль"
         android:inputType="textPassword"
+        android:text="fghvbn123rty"
         android:layout_marginTop="16dp" />
 
     <Button

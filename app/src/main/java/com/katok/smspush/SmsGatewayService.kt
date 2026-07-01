@@ -4,20 +4,19 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
-import android.os.Build
-import android.os.Handler
-import android.os.IBinder
-import android.os.Looper
+import android.content.pm.PackageManager
+import android.os.*
 import android.telephony.SmsManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
-import okhttp3.*
-import java.io.IOException
-import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
+import java.util.concurrent.TimeUnit
 
 class SmsGatewayService : Service() {
 
@@ -27,14 +26,12 @@ class SmsGatewayService : Service() {
         const val ACTION_STOP = "stop"
         const val CHANNEL_ID = "sms_gateway_channel"
         const val NOTIFICATION_ID = 1
-        const val WS_URL = "ws://192.168.0.119:8081/ws"
-        const val REFRESH_URL = "http://192.168.0.119:8081/auth/refresh"
-        // Интервал обновления токена (25 минут, чтобы успеть до истечения 30 мин)
+        const val WS_URL = "wss://varamy.online/ws"
+        const val REFRESH_URL = "https://varamy.online/api/auth/refresh"
         const val TOKEN_REFRESH_INTERVAL = 25 * 60 * 1000L
     }
 
     private lateinit var tokenManager: TokenManager
-    private var webSocket: WebSocket? = null
     private val gson = Gson()
     private val handler = Handler(Looper.getMainLooper())
     private var reconnectRunnable: Runnable? = null
@@ -44,24 +41,32 @@ class SmsGatewayService : Service() {
     private lateinit var notificationManager: NotificationManager
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
+
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         tokenManager = TokenManager(this)
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
+        acquireWakeLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
                 startForeground(NOTIFICATION_ID, buildNotification("Шлюз запущен"))
+                requestBatteryOptimizationExemption()
+                // Отключаем старое соединение перед подключением
+                WebSocketManager.getInstance().disconnect()
                 connectWebSocket()
                 scheduleTokenRefresh()
             }
             ACTION_STOP -> {
-                disconnectWebSocket()
+                WebSocketManager.getInstance().disconnect()
                 cancelAllTimers()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -70,77 +75,42 @@ class SmsGatewayService : Service() {
         return START_STICKY
     }
 
-    // ---------- WebSocket ----------
     private fun connectWebSocket() {
         val accessToken = tokenManager.getAccessToken()
         if (accessToken == null) {
-            Log.e(TAG, "Access token is missing! Please login first.")
+            Log.e(TAG, "[AUTH] Access token is missing!")
             updateNotification("Нет токена – авторизуйтесь")
             return
         }
-
-        val request = Request.Builder()
-            .url(WS_URL)
-            .addHeader("Authorization", "Bearer $accessToken")
-            .build()
-
-        webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
-
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d(TAG, "WebSocket connected")
-                updateNotification("Шлюз подключён")
-                cancelReconnect()
-
-                // Подписка на личную очередь команд
-                val subscribeFrame = """
-                    SUBSCRIBE
-                    id:sub-0
-                    destination:/user/queue/sms-commands
-                    
-                """.trimIndent() + "\n\n\u0000"
-                webSocket.send(subscribeFrame)
+        Log.d(TAG, "[WS] Connecting to $WS_URL")
+        // Сначала отключаем старое соединение
+        WebSocketManager.getInstance().disconnect()
+        WebSocketManager.getInstance().connect(
+            url = WS_URL,
+            token = accessToken,
+            listener = { rawMessage ->
+                handleStompMessage(rawMessage)
             }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                if (text.startsWith("MESSAGE")) {
-                    handleStompMessage(text)
-                } else if (text.contains("ERROR")) {
-                    Log.e(TAG, "STOMP error frame: $text")
-                    // Возможно, ошибка аутентификации – пробуем обновить токен
-                    tryRefreshAndReconnect()
-                }
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket failure: ${t.message}, response=${response?.code}")
-                if (response?.code == 401) {
-                    // Точно проблема с токеном
-                    tryRefreshAndReconnect()
-                } else {
-                    scheduleReconnect()
-                }
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d(TAG, "WebSocket closed: $reason")
-                scheduleReconnect()
-            }
-        })
-        webSocket?.send("CONNECT\naccept-version:1.1,1.0\n\n\u0000")
-    }
-
-    private fun disconnectWebSocket() {
-        webSocket?.close(1000, "Service stopped")
-        webSocket = null
-        cancelReconnect()
+        )
     }
 
     private fun handleStompMessage(raw: String) {
+        Log.d(TAG, "[WS] Handling STOMP message: $raw")
         try {
-            val body = raw.substringAfter("\n\n").trim()
-            if (body.isEmpty()) return
+            val bodyStart = raw.indexOf("\n\n")
+            if (bodyStart == -1) {
+                Log.w(TAG, "No body found in STOMP message")
+                return
+            }
+            var body = raw.substring(bodyStart + 2).trim()
+            body = body.replace("\u0000", "").trim()
+            if (body.isEmpty()) {
+                Log.w(TAG, "Empty body")
+                return
+            }
+            Log.d(TAG, "[WS] Parsing JSON: $body")
             val command = gson.fromJson(body, SmsCommand::class.java)
-            Log.d(TAG, "Parsed command: $command")
+            Log.d(TAG, "[CMD] Received: phone=${command.phone}, code=${command.code}, purpose=${command.purpose}")
 
             val success = sendSms(command.phone, command.code)
             val response = SmsResponse(
@@ -150,35 +120,29 @@ class SmsGatewayService : Service() {
             )
             sendResponse(response)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to handle STOMP message", e)
+            Log.e(TAG, "[CMD] Failed to handle STOMP message", e)
         }
     }
 
     private fun sendResponse(response: SmsResponse) {
         val json = gson.toJson(response)
-        val frame = """
-            SEND
-            destination:/app/sms-response
-            content-type:application/json
-            
-            $json
-        """.trimIndent() + "\n\n\u0000"
-        webSocket?.send(frame)
+        WebSocketManager.getInstance().sendResponse(json)
+        Log.d(TAG, "[RESP] Sent: $json")
     }
 
-    // ---------- SMS ----------
     private fun sendSms(phone: String, code: String): Boolean {
         return try {
             val smsManager = SmsManager.getDefault()
             val message = "Код подтверждения: $code"
             smsManager.sendTextMessage(phone, null, message, null, null)
+            Log.d(TAG, "[SMS] Sent to $phone: $message")
             true
         } catch (e: Exception) {
+            Log.e(TAG, "[SMS] Failed to send to $phone: ${e.message}")
             false
         }
     }
 
-    // ---------- Token Refresh ----------
     private fun tryRefreshAndReconnect() {
         if (isRefreshingToken) return
         isRefreshingToken = true
@@ -187,11 +151,11 @@ class SmsGatewayService : Service() {
             handler.post {
                 isRefreshingToken = false
                 if (success) {
-                    Log.d(TAG, "Token refreshed, reconnecting...")
-                    webSocket = null
+                    Log.d(TAG, "[AUTH] Token refreshed, reconnecting...")
+                    WebSocketManager.getInstance().disconnect()
                     connectWebSocket()
                 } else {
-                    Log.e(TAG, "Token refresh failed – will retry later")
+                    Log.e(TAG, "[AUTH] Token refresh failed – will retry later")
                     scheduleReconnect()
                 }
             }
@@ -201,9 +165,9 @@ class SmsGatewayService : Service() {
     private fun refreshToken(): Boolean {
         val refreshToken = tokenManager.getRefreshToken() ?: return false
         val jsonBody = """{"refreshToken":"$refreshToken"}"""
-        val request = Request.Builder()
+        val request = okhttp3.Request.Builder()
             .url(REFRESH_URL)
-            .post(RequestBody.create("application/json".toMediaType(), jsonBody))
+            .post(okhttp3.RequestBody.create("application/json; charset=utf-8".toMediaType(), jsonBody))
             .build()
         try {
             val response = okHttpClient.newCall(request).execute()
@@ -212,36 +176,33 @@ class SmsGatewayService : Service() {
             val tokenResponse = gson.fromJson(body, TokenRefreshResponse::class.java)
             if (tokenResponse.accessToken != null && tokenResponse.refreshToken != null) {
                 tokenManager.saveTokens(tokenResponse.accessToken!!, tokenResponse.refreshToken!!)
+                Log.d(TAG, "[AUTH] Tokens updated")
                 return true
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error refreshing token", e)
+            Log.e(TAG, "[AUTH] Error refreshing token", e)
         }
         return false
     }
 
-    // Классы для парсинга ответа сервера (зависят от формата вашего API)
     data class TokenRefreshResponse(
         @SerializedName("accessToken") val accessToken: String?,
         @SerializedName("refreshToken") val refreshToken: String?
     )
 
-    // Периодическое обновление токена, чтобы не допустить истечения во время работы
     private fun scheduleTokenRefresh() {
         tokenRefreshRunnable = Runnable {
-            Log.d(TAG, "Proactive token refresh")
+            Log.d(TAG, "[AUTH] Proactive token refresh")
             tryRefreshAndReconnect()
-            // Заново планируем следующее обновление
             handler.postDelayed(tokenRefreshRunnable!!, TOKEN_REFRESH_INTERVAL)
         }
         handler.postDelayed(tokenRefreshRunnable!!, TOKEN_REFRESH_INTERVAL)
     }
 
-    // ---------- Reconnect ----------
     private fun scheduleReconnect() {
         cancelReconnect()
         reconnectRunnable = Runnable {
-            Log.d(TAG, "Attempting reconnect...")
+            Log.d(TAG, "[WS] Attempting reconnect...")
             connectWebSocket()
         }
         handler.postDelayed(reconnectRunnable!!, 10_000)
@@ -256,7 +217,34 @@ class SmsGatewayService : Service() {
         tokenRefreshRunnable?.let { handler.removeCallbacks(it) }
     }
 
-    // ---------- Notification ----------
+    private fun acquireWakeLock() {
+        if (checkSelfPermission(android.Manifest.permission.WAKE_LOCK) == PackageManager.PERMISSION_GRANTED) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "SmsGateway::WakeLock"
+            )
+            wakeLock?.acquire(10 * 60 * 1000L)
+            Log.d(TAG, "[POWER] WakeLock acquired")
+        } else {
+            Log.w(TAG, "[POWER] WAKE_LOCK permission not granted")
+        }
+    }
+
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                Log.d(TAG, "[POWER] Requesting battery optimization exemption")
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        super.onDestroy()
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(

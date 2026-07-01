@@ -5,12 +5,12 @@ plugins {
 }
 
 android {
-    namespace = "com.example.smsgateway"
+    namespace = "com.katok.smspush"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.smsgateway"
-        minSdk = 21
+        applicationId = "com.katok.smspush"
+        minSdk = 23
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -38,14 +38,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
-
-    // Stomp клиент
-    implementation("com.github.NaikSoftware:StompProtocolAndroid:1.6.6")
-    // OkHttp (Stomp уже включает, но для явности)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // Gson
     implementation("com.google.code.gson:gson:2.10.1")
-    // Coroutines (опционально)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 }
 
@@ -55,17 +49,24 @@ dependencies {
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" /> <!-- для Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="SMS Gateway"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light">
+        android:theme="@style/Theme.SMSPush"
+        android:usesCleartextTraffic="true">
+
+        <!-- Экран входа – запускается при старте -->
         <activity
-            android:name=".MainActivity"
+            android:name="com.katok.smspush.LoginActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -73,18 +74,24 @@ dependencies {
             </intent-filter>
         </activity>
 
+        <!-- Главный экран управления -->
+        <activity
+            android:name="com.katok.smspush.MainActivity"
+            android:exported="false" />
+
         <service
-            android:name=".SmsGatewayService"
+            android:name="com.katok.smspush.SmsGatewayService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
         <receiver
-            android:name=".BootReceiver"
+            android:name="com.katok.smspush.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
     </application>
 
 </manifest>
@@ -112,6 +119,7 @@ org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
 # org.gradle.parallel=true
 # Kotlin code style for this project: "official" or "obsolete":
 kotlin.code.style=official
+android.useAndroidX=true
 
 ========= gradle/libs.versions.toml =======
 [versions]
@@ -122,6 +130,7 @@ junitVersion = "1.3.0"
 espressoCore = "3.7.0"
 appcompat = "1.7.1"
 material = "1.14.0"
+lifecycleCommonJvm = "2.11.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -130,6 +139,7 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "j
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+androidx-lifecycle-common-jvm = { group = "androidx.lifecycle", name = "lifecycle-common-jvm", version.ref = "lifecycleCommonJvm" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -139,24 +149,22 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 #Wed Jul 01 00:52:31 NOVT 2026
 distributionBase=GRADLE_USER_HOME
 distributionPath=wrapper/dists
-distributionSha256Sum=b266d5ff6b90eada6dc3b20cb090e3731302e553a27c5d3e4df1f0d76beaff06
-distributionUrl=https\://services.gradle.org/distributions/gradle-9.3.1-bin.zip
+distributionSha256Sum=544c35d6bd849ae8a5ed0bcea39ba677dc40f49df7d1835561582da2009b961d
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-bin.zip
 networkTimeout=10000
 validateDistributionUrl=true
 zipStoreBase=GRADLE_USER_HOME
 zipStorePath=wrapper/dists
 
 ========= local.properties =======
-## This file is automatically generated by Android Studio.
-# Do not modify this file -- YOUR CHANGES WILL BE ERASED!
-#
-# This file should *NOT* be checked into Version Control Systems,
+## This file must *NOT* be checked into Version Control Systems,
 # as it contains information specific to your local configuration.
 #
 # Location of the SDK. This is only used by Gradle.
 # For customization when using a Version Control System, please read the
 # header note.
-sdk.dir=C\:\\Users\\prora\\AppData\\Local\\Android\\Sdk
+#Wed Jul 01 08:31:06 NOVT 2026
+sdk.dir=C\:\\Users\\amgve\\AppData\\Local\\Android\\Sdk
 
 ========= settings.gradle.kts =======
 pluginManagement {
@@ -180,6 +188,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
