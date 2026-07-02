@@ -20,8 +20,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "New FCM token: $token")
-        // Отправляем токен на сервер
+        MainActivity.appendLog("🔥 Новый FCM-токен: ${token.take(20)}...")
         sendTokenToServer(token)
     }
 
@@ -54,7 +53,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val json = """{"token":"$token"}"""
         val requestBody = json.toRequestBody("application/json; charset=utf-8".toMediaType())
         val request = Request.Builder()
-            .url(BASE_URL + "/api/sms-gateway/register-token")
+            .url(BASE_URL + "/api/fcm/register")
             .addHeader("Authorization", "Bearer $accessToken")
             .post(requestBody)
             .build()

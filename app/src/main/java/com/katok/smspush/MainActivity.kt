@@ -85,6 +85,7 @@ class MainActivity : AppCompatActivity() {
         appendLog("Приложение запущено")
         appendLog("Токен: ${tokenManager.getAccessToken()?.take(20)}...")
 
+
         // Запрос на отключение оптимизации батареи
         requestBatteryOptimization()
     }
@@ -93,7 +94,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         activityRef = this
         updateLogs()
-        requestBatteryOptimization()
+        //requestBatteryOptimization()
     }
 
     override fun onDestroy() {
