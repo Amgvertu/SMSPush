@@ -4,30 +4,37 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.net.Uri
+import android.view.View
 import android.widget.Button
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import java.text.SimpleDateFormat
+import java.util.*
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tokenManager: TokenManager
     private lateinit var tvLogs: TextView
+    private lateinit var scrollView: ScrollView
+    private val logHandler = Handler(Looper.getMainLooper())
 
     companion object {
         private var logText = ""
-        private var mainActivity: MainActivity? = null
+        private var activityRef: MainActivity? = null
 
         fun appendLog(message: String) {
-            logText += "${android.text.format.DateFormat.format("HH:mm:ss", System.currentTimeMillis())} $message\n"
-            mainActivity?.runOnUiThread {
-                mainActivity?.tvLogs?.text = logText
-                // Прокручиваем вниз
-                val scrollView = mainActivity?.tvLogs?.parent as? android.widget.ScrollView
-                scrollView?.fullScroll(android.view.View.FOCUS_DOWN)
+            val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            logText = "$logText\n$timestamp $message"
+            // Обновляем UI из любого потока
+            activityRef?.runOnUiThread {
+                activityRef?.updateLogs()
             }
         }
     }
@@ -35,10 +42,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        activityRef = this
 
-        mainActivity = this
         tokenManager = TokenManager(this)
-        tvLogs = findViewById(R.id.tvLogs)
 
         // Если токенов нет – отправляем на экран входа
         if (tokenManager.getAccessToken() == null || tokenManager.getRefreshToken() == null) {
@@ -47,11 +53,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        tvLogs = findViewById(R.id.tvLogs)
+        scrollView = findViewById(R.id.scrollView)
+
         val btnStart = findViewById<Button>(R.id.btnStart)
         val btnStop = findViewById<Button>(R.id.btnStop)
+        val btnClear = findViewById<Button>(R.id.btnClearLogs)
 
         btnStart.setOnClickListener {
-            appendLog("▶️ Запуск шлюза...")
+            appendLog("Нажата кнопка 'Запустить шлюз'")
             Intent(this, SmsGatewayService::class.java).also { intent ->
                 intent.action = SmsGatewayService.ACTION_START
                 startService(intent)
@@ -59,19 +69,47 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnStop.setOnClickListener {
-            appendLog("⏹️ Остановка шлюза...")
+            appendLog("Нажата кнопка 'Остановить шлюз'")
             Intent(this, SmsGatewayService::class.java).also { intent ->
                 intent.action = SmsGatewayService.ACTION_STOP
                 startService(intent)
             }
         }
 
-        // Отображаем сохранённые логи
-        tvLogs.text = logText
+        btnClear.setOnClickListener {
+            logText = ""
+            tvLogs.text = "Логи очищены"
+        }
+
+        // Начальные логи
+        appendLog("Приложение запущено")
+        appendLog("Токен: ${tokenManager.getAccessToken()?.take(20)}...")
+
+        // Запрос на отключение оптимизации батареи
+        requestBatteryOptimization()
     }
 
     override fun onResume() {
         super.onResume()
+        activityRef = this
+        updateLogs()
+        requestBatteryOptimization()
+    }
+
+    override fun onDestroy() {
+        activityRef = null
+        super.onDestroy()
+    }
+
+    private fun updateLogs() {
+        tvLogs.text = logText
+        // Прокрутка вниз
+        scrollView.post {
+            scrollView.fullScroll(View.FOCUS_DOWN)
+        }
+    }
+
+    private fun requestBatteryOptimization() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
@@ -90,8 +128,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        mainActivity = null
+    override fun onStart() {
+        super.onStart()
+        requestPermissions(arrayOf(android.Manifest.permission.SEND_SMS), 100)
     }
 }

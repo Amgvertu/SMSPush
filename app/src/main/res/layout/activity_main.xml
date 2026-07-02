@@ -12,29 +12,37 @@
 
         <Button
             android:id="@+id/btnStart"
-            android:layout_width="0dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:text="Запустить шлюз" />
 
         <Button
             android:id="@+id/btnStop"
-            android:layout_width="0dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:text="Остановить шлюз" />
+
+        <Button
+            android:id="@+id/btnClearLogs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Очистить логи" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/tvLogs"
+    <ScrollView
+        android:id="@+id/scrollView"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="match_parent"
+        android:layout_marginTop="16dp"
         android:background="#f0f0f0"
-        android:padding="8dp"
-        android:scrollbars="vertical"
-        android:textColor="@color/black"
-        android:text="Ожидание..."
-        android:textSize="12sp" />
+        android:padding="8dp">
 
+        <TextView
+            android:id="@+id/tvLogs"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Логи будут здесь..."
+            android:textSize="12sp"
+            android:fontFamily="monospace" />
+    </ScrollView>
 </LinearLayout>

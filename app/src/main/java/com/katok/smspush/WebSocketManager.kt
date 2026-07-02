@@ -1,6 +1,9 @@
 package com.katok.smspush
 
 import android.util.Log
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.disposables.CompositeDisposable
+import io.reactivex.schedulers.Schedulers
 import ua.naiksoftware.stomp.Stomp
 import ua.naiksoftware.stomp.StompClient
 import ua.naiksoftware.stomp.dto.LifecycleEvent
@@ -26,67 +29,76 @@ class WebSocketManager private constructor() {
     @Volatile
     private var isConnecting = false
     private var messageListener: ((String) -> Unit)? = null
+    private val compositeDisposable = CompositeDisposable()
 
     @Synchronized
     fun connect(url: String, token: String, listener: (String) -> Unit) {
         if (isConnected || isConnecting) {
-            Log.d(TAG, "Already connected or connecting, skipping")
+            MainActivity.appendLog("⚠️ Уже подключены или подключаемся")
             return
         }
         disconnect()
 
         isConnecting = true
         messageListener = listener
+        MainActivity.appendLog("🌐 Подключение к $url")
 
         stompClient = Stomp.over(Stomp.ConnectionProvider.OKHTTP, url)
-
-        // Настраиваем heartbeat
         stompClient?.withClientHeartbeat(10000)
         stompClient?.withServerHeartbeat(10000)
 
         val connectHeaders = listOf(
-            StompHeader("Authorization", "Bearer $token")
+            StompHeader("Authorization", "Bearer $token"),
+            StompHeader("accept-version", "1.1,1.0")
         )
 
-        stompClient?.lifecycle()?.subscribe({ event ->
-            Log.d(TAG, "Lifecycle: ${event.type}")
-            when (event.type) {
-                LifecycleEvent.Type.OPENED -> {
-                    Log.d(TAG, "STOMP OPENED")
-                    isConnected = true
-                    isConnecting = false
-                    // Подписываемся на очередь
-                    stompClient?.topic("/user/queue/sms-commands")?.subscribe({ message ->
-                        Log.d(TAG, "Received message: ${message.payload}")
-                        listener(message.payload)
-                    }, { error ->
-                        Log.e(TAG, "Subscription error", error)
-                    })
-                    Log.d(TAG, "Subscribed to /user/queue/sms-commands")
+        stompClient?.lifecycle()
+            ?.subscribeOn(Schedulers.io())
+            ?.observeOn(AndroidSchedulers.mainThread())
+            ?.subscribe({ event ->
+                MainActivity.appendLog("🔄 STOMP событие: ${event.type}")
+                when (event.type) {
+                    LifecycleEvent.Type.OPENED -> {
+                        MainActivity.appendLog("✅ STOMP OPENED")
+                        isConnected = true
+                        isConnecting = false
+                        stompClient?.topic("/user/queue/sms-commands")
+                            ?.subscribeOn(Schedulers.io())
+                            ?.observeOn(AndroidSchedulers.mainThread())
+                            ?.subscribe({ message ->
+                                MainActivity.appendLog("📩 Сообщение получено")
+                                listener(message.payload)
+                            }, { error ->
+                                MainActivity.appendLog("❌ Ошибка подписки: ${error.message}")
+                            })?.let { compositeDisposable.add(it) }
+                        MainActivity.appendLog("📡 Подписан на /user/queue/sms-commands")
+                    }
+                    LifecycleEvent.Type.CLOSED -> {
+                        MainActivity.appendLog("🔴 STOMP CLOSED")
+                        isConnected = false
+                        isConnecting = false
+                    }
+                    LifecycleEvent.Type.ERROR -> {
+                        MainActivity.appendLog("❌ STOMP ERROR: ${event.exception?.message}")
+                        isConnected = false
+                        isConnecting = false
+                    }
+                    else -> {}
                 }
-                LifecycleEvent.Type.CLOSED -> {
-                    Log.d(TAG, "STOMP CLOSED")
-                    isConnected = false
-                    isConnecting = false
-                }
-                LifecycleEvent.Type.ERROR -> {
-                    Log.e(TAG, "STOMP ERROR", event.exception)
-                    isConnected = false
-                    isConnecting = false
-                }
-                else -> {}
-            }
-        }, { error ->
-            Log.e(TAG, "Lifecycle error", error)
-            isConnected = false
-            isConnecting = false
-        })
+            }, { error ->
+                MainActivity.appendLog("❌ Ошибка жизненного цикла: ${error.message}")
+                isConnected = false
+                isConnecting = false
+            })?.let { compositeDisposable.add(it) }
 
         stompClient?.connect(connectHeaders)
+        MainActivity.appendLog("⏳ Отправлен CONNECT")
     }
 
     @Synchronized
     fun disconnect() {
+        MainActivity.appendLog("🔌 Отключение WebSocket")
+        compositeDisposable.clear()
         stompClient?.disconnect()
         stompClient = null
         isConnected = false
@@ -96,13 +108,17 @@ class WebSocketManager private constructor() {
     @Synchronized
     fun sendResponse(response: String) {
         if (!isConnected || stompClient == null) {
-            Log.w(TAG, "Cannot send response, not connected")
+            MainActivity.appendLog("⚠️ Не удалось отправить ответ: не подключены")
             return
         }
         stompClient?.send("/app/sms-response", response)
-            ?.subscribe({ Log.d(TAG, "Response sent") }, { error ->
-                Log.e(TAG, "Failed to send response", error)
-            })
+            ?.subscribeOn(Schedulers.io())
+            ?.observeOn(AndroidSchedulers.mainThread())
+            ?.subscribe({
+                MainActivity.appendLog("✅ Ответ отправлен")
+            }, { error ->
+                MainActivity.appendLog("❌ Ошибка отправки ответа: ${error.message}")
+            })?.let { compositeDisposable.add(it) }
     }
 
     fun isConnected(): Boolean = isConnected

@@ -11,11 +11,9 @@ import android.os.*
 import android.telephony.SmsManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import okhttp3.OkHttpClient
-import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import java.util.concurrent.TimeUnit
 
@@ -27,14 +25,17 @@ class SmsGatewayService : Service() {
         const val ACTION_STOP = "stop"
         const val CHANNEL_ID = "sms_gateway_channel"
         const val NOTIFICATION_ID = 1
-        /*const val WS_URL = "wss://varamy.online/ws"
-        const val REFRESH_URL = "https://varamy.online/api/auth/refresh"*/
+        const val WS_URL = "wss://varamy.online/ws"
+        const val REFRESH_URL = "https://varamy.online/api/auth/refresh"
 
-        const val WS_URL = "ws://192.168.0.119:8081/ws"
-        const val REFRESH_URL = "http://192.168.0.119:8081/api/auth/refresh"
+        /*const val WS_URL = "ws://192.168.0.119:8081/ws"
+        const val REFRESH_URL = "http://192.168.0.119:8081/api/auth/refresh"*/
         const val TOKEN_REFRESH_INTERVAL = 25 * 60 * 1000L
         const val ACTION_STATUS_BROADCAST = "SMS_GATEWAY_STATUS"
         const val ACTION_REQUEST_STATUS = "SMS_GATEWAY_STATUS_REQUEST"
+
+        private var instance: SmsGatewayService? = null
+        fun getInstance(): SmsGatewayService? = instance
     }
 
     private lateinit var tokenManager: TokenManager
@@ -55,100 +56,79 @@ class SmsGatewayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         tokenManager = TokenManager(this)
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
         acquireWakeLock()
-
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            Log.e(TAG, "Uncaught exception in thread $thread", throwable)
-            // Перезапускаем WebSocket через 5 секунд
-            handler.postDelayed({
-                if (WebSocketManager.getInstance().isConnected()) {
-                    Log.d(TAG, "Restarting WebSocket after crash")
-                    WebSocketManager.getInstance().disconnect()
-                    connectWebSocket()
-                }
-            }, 5000)
-        }
+        MainActivity.appendLog("Сервис создан")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                handleStatusRequest()
                 startForeground(NOTIFICATION_ID, buildNotification("Шлюз запущен"))
+                MainActivity.appendLog("Сервис запущен")
                 requestBatteryOptimizationExemption()
                 connectWebSocket()
                 scheduleTokenRefresh()
-                sendStatusBroadcast(true)
             }
             ACTION_STOP -> {
+                MainActivity.appendLog("Сервис останавливается")
                 WebSocketManager.getInstance().disconnect()
                 cancelAllTimers()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
-                sendStatusBroadcast(false)
-            }
-            ACTION_REQUEST_STATUS -> {
-                // Запрашиваем текущий статус у менеджера
-                val isRunning = WebSocketManager.getInstance().isConnected()
-                sendStatusBroadcast(isRunning)
             }
         }
         return START_STICKY
     }
 
     private fun connectWebSocket() {
-        try {
-            val accessToken = tokenManager.getAccessToken()
-            if (accessToken == null) {
-                Log.e(TAG, "[AUTH] Access token is missing!")
-                updateNotification("Нет токена – авторизуйтесь")
-                return
-            }
-            Log.d(TAG, "[WS] Connecting to $WS_URL")
-            WebSocketManager.getInstance().disconnect()
-            WebSocketManager.getInstance().connect(
-                url = WS_URL,
-                token = accessToken,
-                listener = { rawMessage ->
-                    handleStompMessage(rawMessage)
-                }
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "[WS] Connection error", e)
-            scheduleReconnect()
+        val accessToken = tokenManager.getAccessToken()
+        if (accessToken == null) {
+            MainActivity.appendLog("❌ Нет токена! Авторизуйтесь.")
+            return
         }
+        MainActivity.appendLog("Подключение к WebSocket...")
+        WebSocketManager.getInstance().connect(
+            url = WS_URL,
+            token = accessToken,
+            listener = { rawMessage ->
+                handleStompMessage(rawMessage)
+            }
+        )
+    }
+
+    fun reconnectWebSocket() {
+        MainActivity.appendLog("🔄 Переподключение WebSocket по запросу")
+        WebSocketManager.getInstance().disconnect()
+        connectWebSocket()
     }
 
     private fun handleStompMessage(raw: String) {
+        MainActivity.appendLog("📩 Получено сообщение от сервера: $raw")
         try {
-            Log.d(TAG, "[WS] Handling STOMP message: $raw")
             val command = gson.fromJson(raw, SmsCommand::class.java)
-            Log.d(TAG, "[CMD] Received: phone=${command.phone}, code=${command.code}, purpose=${command.purpose}")
+            MainActivity.appendLog("📱 Команда: телефон=${command.phone}, код=${command.code}, цель=${command.purpose}")
 
             val success = sendSms(command.phone, command.code)
             val response = SmsResponse(
                 requestId = command.requestId,
                 success = success,
-                errorMessage = if (success) null else "SMS send failed"
+                errorMessage = if (success) null else "Ошибка отправки SMS"
             )
             sendResponse(response)
         } catch (e: Exception) {
-            Log.e(TAG, "[CMD] Failed to handle STOMP message", e)
-            // Не выбрасываем исключение дальше, чтобы не уронить приложение
+            MainActivity.appendLog("❌ Ошибка обработки команды: ${e.message}")
+            Log.e(TAG, "Failed to handle STOMP message", e)
         }
     }
 
     private fun sendResponse(response: SmsResponse) {
-        try {
-            val json = gson.toJson(response)
-            WebSocketManager.getInstance().sendResponse(json)
-            Log.d(TAG, "[RESP] Sent: $json")
-        } catch (e: Exception) {
-            Log.e(TAG, "[RESP] Failed to send response", e)
-        }
+        val json = gson.toJson(response)
+        WebSocketManager.getInstance().sendResponse(json)
+        MainActivity.appendLog("✅ Ответ отправлен: success=${response.success}")
     }
 
     private fun sendSms(phone: String, code: String): Boolean {
@@ -156,14 +136,11 @@ class SmsGatewayService : Service() {
             val smsManager = SmsManager.getDefault()
             val message = "Код подтверждения: $code"
             smsManager.sendTextMessage(phone, null, message, null, null)
-            val logMsg = "[SMS] Sent to $phone: $message"
-            Log.d(TAG, logMsg)
-            MainActivity.appendLog("✅ SMS отправлено на $phone")
+            MainActivity.appendLog("📤 SMS отправлено на $phone")
             true
         } catch (e: Exception) {
-            val logMsg = "[SMS] Failed to send to $phone: ${e.message}"
-            Log.e(TAG, logMsg, e)
             MainActivity.appendLog("❌ Ошибка отправки SMS: ${e.message}")
+            Log.e(TAG, "Failed to send SMS", e)
             false
         }
     }
@@ -176,12 +153,11 @@ class SmsGatewayService : Service() {
             handler.post {
                 isRefreshingToken = false
                 if (success) {
-                    Log.d(TAG, "[AUTH] Token refreshed, reconnecting...")
+                    MainActivity.appendLog("🔄 Токен обновлён, переподключаемся")
                     WebSocketManager.getInstance().disconnect()
                     connectWebSocket()
                 } else {
-                    Log.e(TAG, "[AUTH] Token refresh failed – will retry later")
-                    scheduleReconnect()
+                    MainActivity.appendLog("❌ Не удалось обновить токен")
                 }
             }
         }.start()
@@ -194,20 +170,21 @@ class SmsGatewayService : Service() {
             .url(REFRESH_URL)
             .post(okhttp3.RequestBody.create("application/json; charset=utf-8".toMediaType(), jsonBody))
             .build()
-        try {
+        return try {
             val response = okHttpClient.newCall(request).execute()
             if (!response.isSuccessful) return false
             val body = response.body?.string() ?: return false
             val tokenResponse = gson.fromJson(body, TokenRefreshResponse::class.java)
             if (tokenResponse.accessToken != null && tokenResponse.refreshToken != null) {
                 tokenManager.saveTokens(tokenResponse.accessToken!!, tokenResponse.refreshToken!!)
-                Log.d(TAG, "[AUTH] Tokens updated")
+                MainActivity.appendLog("✅ Токены обновлены")
                 return true
             }
+            false
         } catch (e: Exception) {
-            Log.e(TAG, "[AUTH] Error refreshing token", e)
+            MainActivity.appendLog("❌ Ошибка обновления токена: ${e.message}")
+            false
         }
-        return false
     }
 
     data class TokenRefreshResponse(
@@ -217,7 +194,7 @@ class SmsGatewayService : Service() {
 
     private fun scheduleTokenRefresh() {
         tokenRefreshRunnable = Runnable {
-            Log.d(TAG, "[AUTH] Proactive token refresh")
+            MainActivity.appendLog("⏰ Запланированное обновление токена")
             tryRefreshAndReconnect()
             handler.postDelayed(tokenRefreshRunnable!!, TOKEN_REFRESH_INTERVAL)
         }
@@ -227,7 +204,7 @@ class SmsGatewayService : Service() {
     private fun scheduleReconnect() {
         cancelReconnect()
         reconnectRunnable = Runnable {
-            Log.d(TAG, "[WS] Attempting reconnect...")
+            MainActivity.appendLog("🔄 Попытка переподключения")
             connectWebSocket()
         }
         handler.postDelayed(reconnectRunnable!!, 10_000)
@@ -250,9 +227,8 @@ class SmsGatewayService : Service() {
                 "SmsGateway::WakeLock"
             )
             wakeLock?.acquire(10 * 60 * 1000L)
-            Log.d(TAG, "[POWER] WakeLock acquired")
         } else {
-            Log.w(TAG, "[POWER] WAKE_LOCK permission not granted")
+            MainActivity.appendLog("⚠️ Нет разрешения WAKE_LOCK")
         }
     }
 
@@ -260,13 +236,15 @@ class SmsGatewayService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
-                Log.d(TAG, "[POWER] Requesting battery optimization exemption")
+                MainActivity.appendLog("⚠️ Оптимизация батареи включена! Отключите вручную.")
             }
         }
     }
 
     override fun onDestroy() {
+        instance = null
         wakeLock?.let { if (it.isHeld) it.release() }
+        MainActivity.appendLog("Сервис уничтожен")
         super.onDestroy()
     }
 
@@ -290,29 +268,5 @@ class SmsGatewayService : Service() {
             .build()
     }
 
-    private fun updateNotification(text: String) {
-        val notification = buildNotification(text)
-        notificationManager.notify(NOTIFICATION_ID, notification)
-    }
-
     override fun onBind(intent: Intent?): IBinder? = null
-
-    private fun sendStatus(isRunning: Boolean) {
-        val intent = Intent("SMS_GATEWAY_STATUS")
-        intent.putExtra("isRunning", isRunning)
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
-    }
-
-    private fun handleStatusRequest() {
-        val running = WebSocketManager.getInstance().isConnected()
-        sendStatusBroadcast(running)
-    }
-
-
-    // Отправка статуса:
-    private fun sendStatusBroadcast(running: Boolean) {
-        val intent = Intent(ACTION_STATUS_BROADCAST)
-        intent.putExtra("isRunning", running)
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
-    }
 }
