@@ -4,10 +4,12 @@ import android.util.Log
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.schedulers.Schedulers
+import okhttp3.OkHttpClient
 import ua.naiksoftware.stomp.Stomp
 import ua.naiksoftware.stomp.StompClient
 import ua.naiksoftware.stomp.dto.LifecycleEvent
 import ua.naiksoftware.stomp.dto.StompHeader
+import java.util.concurrent.TimeUnit
 
 class WebSocketManager private constructor() {
 
@@ -43,7 +45,17 @@ class WebSocketManager private constructor() {
         messageListener = listener
         MainActivity.appendLog("🌐 Подключение к $url")
 
+        // Правильное создание OkHttpClient с таймаутами
+        val okHttpClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+        // ИСПРАВЛЕННЫЙ СПОСОБ: передаём OkHttpClient как параметр
         stompClient = Stomp.over(Stomp.ConnectionProvider.OKHTTP, url)
+
+        // Настройка heartbeat
         stompClient?.withClientHeartbeat(10000)
         stompClient?.withServerHeartbeat(10000)
 
@@ -62,6 +74,7 @@ class WebSocketManager private constructor() {
                         MainActivity.appendLog("✅ STOMP OPENED")
                         isConnected = true
                         isConnecting = false
+                        // Подписка на очередь
                         stompClient?.topic("/user/queue/sms-commands")
                             ?.subscribeOn(Schedulers.io())
                             ?.observeOn(AndroidSchedulers.mainThread())
@@ -77,11 +90,20 @@ class WebSocketManager private constructor() {
                         MainActivity.appendLog("🔴 STOMP CLOSED")
                         isConnected = false
                         isConnecting = false
+                        handler.postDelayed({
+                            MainActivity.appendLog("🔄 Попытка переподключения после CLOSED")
+                            connect(url, token, listener)
+                        }, 5000)
                     }
                     LifecycleEvent.Type.ERROR -> {
                         MainActivity.appendLog("❌ STOMP ERROR: ${event.exception?.message}")
                         isConnected = false
                         isConnecting = false
+                        // При ошибке переподключаемся через 10 секунд
+                        handler.postDelayed({
+                            MainActivity.appendLog("🔄 Попытка переподключения после ошибки")
+                            connect(url, token, listener)
+                        }, 10000)
                     }
                     else -> {}
                 }
@@ -122,4 +144,7 @@ class WebSocketManager private constructor() {
     }
 
     fun isConnected(): Boolean = isConnected
+
+    // Handler для переподключения
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 }
