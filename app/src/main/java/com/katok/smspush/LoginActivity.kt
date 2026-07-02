@@ -28,7 +28,7 @@ class LoginActivity : AppCompatActivity() {
 
     // Замените на актуальный адрес, если нужно
     //private val BASE_URL = "http://192.168.0.119:8081"
-    private val BASE_URL = "https://varamy.online"
+    private val BASE_URL = "http" + AppConfig.API_BASE_URL
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -25,8 +25,8 @@ class SmsGatewayService : Service() {
         const val ACTION_STOP = "stop"
         const val CHANNEL_ID = "sms_gateway_channel"
         const val NOTIFICATION_ID = 1
-        const val WS_URL = "wss://varamy.online/ws"
-        const val REFRESH_URL = "https://varamy.online/api/auth/refresh"
+        const val WS_URL = "ws" + AppConfig.API_BASE_URL+"/ws"
+        const val REFRESH_URL = "http" + AppConfig.API_BASE_URL + "/api/auth/refresh"
 
         /*const val WS_URL = "ws://192.168.0.119:8081/ws"
         const val REFRESH_URL = "http://192.168.0.119:8081/api/auth/refresh"*/
