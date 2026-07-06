@@ -25,7 +25,7 @@ class SmsGatewayService : Service() {
         const val ACTION_STOP = "stop"
         const val CHANNEL_ID = "sms_gateway_channel"
         const val NOTIFICATION_ID = 1
-        const val WS_URL = "ws" + AppConfig.API_BASE_URL + "/ws3"
+        const val WS_URL = "ws" + AppConfig.API_BASE_URL + "/ws"
         const val REFRESH_URL = "http" + AppConfig.API_BASE_URL + "/api/auth/refresh"
         const val TOKEN_REFRESH_INTERVAL = 25 * 60 * 1000L
 
