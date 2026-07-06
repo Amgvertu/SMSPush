@@ -25,37 +25,42 @@ class WebSocketManager private constructor() {
         }
     }
 
+    // Интерфейс для уведомления внешнего мира о событиях
+    interface Listener {
+        fun onMessage(payload: String)
+        fun onConnected()
+        fun onClosed()
+        fun onError(throwable: Throwable?)
+    }
+
     private var stompClient: StompClient? = null
     @Volatile
     private var isConnected = false
     @Volatile
     private var isConnecting = false
-    private var messageListener: ((String) -> Unit)? = null
+    private var listener: Listener? = null
     private val compositeDisposable = CompositeDisposable()
 
     @Synchronized
-    fun connect(url: String, token: String, listener: (String) -> Unit) {
+    fun connect(url: String, token: String, listener: Listener) {
         if (isConnected || isConnecting) {
             MainActivity.appendLog("⚠️ Уже подключены или подключаемся")
             return
         }
-        disconnect()
+        disconnect() // гарантируем чистое состояние
 
+        this.listener = listener
         isConnecting = true
-        messageListener = listener
         MainActivity.appendLog("🌐 Подключение к $url")
 
-        // Правильное создание OkHttpClient с таймаутами
         val okHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
 
-        // ИСПРАВЛЕННЫЙ СПОСОБ: передаём OkHttpClient как параметр
         stompClient = Stomp.over(Stomp.ConnectionProvider.OKHTTP, url)
 
-        // Настройка heartbeat
         stompClient?.withClientHeartbeat(10000)
         stompClient?.withServerHeartbeat(10000)
 
@@ -74,13 +79,14 @@ class WebSocketManager private constructor() {
                         MainActivity.appendLog("✅ STOMP OPENED")
                         isConnected = true
                         isConnecting = false
+                        listener.onConnected()
                         // Подписка на очередь
                         stompClient?.topic("/user/queue/sms-commands")
                             ?.subscribeOn(Schedulers.io())
                             ?.observeOn(AndroidSchedulers.mainThread())
                             ?.subscribe({ message ->
                                 MainActivity.appendLog("📩 Сообщение получено")
-                                listener(message.payload)
+                                listener.onMessage(message.payload)
                             }, { error ->
                                 MainActivity.appendLog("❌ Ошибка подписки: ${error.message}")
                             })?.let { compositeDisposable.add(it) }
@@ -90,20 +96,13 @@ class WebSocketManager private constructor() {
                         MainActivity.appendLog("🔴 STOMP CLOSED")
                         isConnected = false
                         isConnecting = false
-                        handler.postDelayed({
-                            MainActivity.appendLog("🔄 Попытка переподключения после CLOSED")
-                            connect(url, token, listener)
-                        }, 5000)
+                        listener.onClosed()
                     }
                     LifecycleEvent.Type.ERROR -> {
                         MainActivity.appendLog("❌ STOMP ERROR: ${event.exception?.message}")
                         isConnected = false
                         isConnecting = false
-                        // При ошибке переподключаемся через 10 секунд
-                        handler.postDelayed({
-                            MainActivity.appendLog("🔄 Попытка переподключения после ошибки")
-                            connect(url, token, listener)
-                        }, 10000)
+                        listener.onError(event.exception)
                     }
                     else -> {}
                 }
@@ -111,6 +110,7 @@ class WebSocketManager private constructor() {
                 MainActivity.appendLog("❌ Ошибка жизненного цикла: ${error.message}")
                 isConnected = false
                 isConnecting = false
+                listener.onError(error)
             })?.let { compositeDisposable.add(it) }
 
         stompClient?.connect(connectHeaders)
@@ -144,7 +144,4 @@ class WebSocketManager private constructor() {
     }
 
     fun isConnected(): Boolean = isConnected
-
-    // Handler для переподключения
-    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
 }

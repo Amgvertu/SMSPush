@@ -13,8 +13,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
-import okhttp3.OkHttpClient
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 class SmsGatewayService : Service() {
@@ -25,14 +25,9 @@ class SmsGatewayService : Service() {
         const val ACTION_STOP = "stop"
         const val CHANNEL_ID = "sms_gateway_channel"
         const val NOTIFICATION_ID = 1
-        const val WS_URL = "ws" + AppConfig.API_BASE_URL+"/ws"
+        const val WS_URL = "ws" + AppConfig.API_BASE_URL + "/ws3"
         const val REFRESH_URL = "http" + AppConfig.API_BASE_URL + "/api/auth/refresh"
-
-        /*const val WS_URL = "ws://192.168.0.119:8081/ws"
-        const val REFRESH_URL = "http://192.168.0.119:8081/api/auth/refresh"*/
         const val TOKEN_REFRESH_INTERVAL = 25 * 60 * 1000L
-        const val ACTION_STATUS_BROADCAST = "SMS_GATEWAY_STATUS"
-        const val ACTION_REQUEST_STATUS = "SMS_GATEWAY_STATUS_REQUEST"
 
         private var instance: SmsGatewayService? = null
         fun getInstance(): SmsGatewayService? = instance
@@ -44,6 +39,8 @@ class SmsGatewayService : Service() {
     private var reconnectRunnable: Runnable? = null
     private var tokenRefreshRunnable: Runnable? = null
     private var isRefreshingToken = false
+    private var reconnectAttempts = 0
+    private val MAX_RECONNECT_ATTEMPTS = 5
 
     private lateinit var notificationManager: NotificationManager
     private val okHttpClient = OkHttpClient.Builder()
@@ -84,18 +81,33 @@ class SmsGatewayService : Service() {
         return START_STICKY
     }
 
+    // ---------- WebSocket подключение ----------
     private fun connectWebSocket() {
         val accessToken = tokenManager.getAccessToken()
         if (accessToken == null) {
             MainActivity.appendLog("❌ Нет токена! Авторизуйтесь.")
             return
         }
+        reconnectAttempts = 0
         MainActivity.appendLog("Подключение к WebSocket...")
         WebSocketManager.getInstance().connect(
             url = WS_URL,
             token = accessToken,
-            listener = { rawMessage ->
-                handleStompMessage(rawMessage)
+            listener = object : WebSocketManager.Listener {
+                override fun onMessage(payload: String) {
+                    handleStompMessage(payload)
+                }
+                override fun onConnected() {
+                    MainActivity.appendLog("✅ WebSocket соединён")
+                }
+                override fun onClosed() {
+                    MainActivity.appendLog("🔴 WebSocket закрыт")
+                    scheduleReconnect()
+                }
+                override fun onError(throwable: Throwable?) {
+                    MainActivity.appendLog("❌ WebSocket ошибка: ${throwable?.message}")
+                    scheduleReconnect()
+                }
             }
         )
     }
@@ -106,6 +118,7 @@ class SmsGatewayService : Service() {
         connectWebSocket()
     }
 
+    // ---------- Обработка сообщений ----------
     private fun handleStompMessage(raw: String) {
         MainActivity.appendLog("📩 Получено сообщение от сервера: $raw")
         try {
@@ -145,6 +158,7 @@ class SmsGatewayService : Service() {
         }
     }
 
+    // ---------- Управление токенами и переподключением ----------
     private fun tryRefreshAndReconnect() {
         if (isRefreshingToken) return
         isRefreshingToken = true
@@ -153,11 +167,13 @@ class SmsGatewayService : Service() {
             handler.post {
                 isRefreshingToken = false
                 if (success) {
+                    reconnectAttempts = 0
                     MainActivity.appendLog("🔄 Токен обновлён, переподключаемся")
                     WebSocketManager.getInstance().disconnect()
                     connectWebSocket()
                 } else {
-                    MainActivity.appendLog("❌ Не удалось обновить токен")
+                    MainActivity.appendLog("❌ Не удалось обновить токен, повтор через 10 сек")
+                    scheduleReconnect()
                 }
             }
         }.start()
@@ -192,6 +208,7 @@ class SmsGatewayService : Service() {
         @SerializedName("refreshToken") val refreshToken: String?
     )
 
+    // ---------- Планировщики ----------
     private fun scheduleTokenRefresh() {
         tokenRefreshRunnable = Runnable {
             MainActivity.appendLog("⏰ Запланированное обновление токена")
@@ -203,11 +220,18 @@ class SmsGatewayService : Service() {
 
     private fun scheduleReconnect() {
         cancelReconnect()
-        reconnectRunnable = Runnable {
-            MainActivity.appendLog("🔄 Попытка переподключения")
-            connectWebSocket()
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            MainActivity.appendLog("⚠️ Превышено число попыток переподключения")
+            reconnectAttempts = 0
+            return
         }
-        handler.postDelayed(reconnectRunnable!!, 10_000)
+        reconnectAttempts++
+        val delay = 5000L * reconnectAttempts // экспоненциальная задержка
+        reconnectRunnable = Runnable {
+            MainActivity.appendLog("🔄 Попытка переподключения #$reconnectAttempts")
+            tryRefreshAndReconnect()
+        }
+        handler.postDelayed(reconnectRunnable!!, delay)
     }
 
     private fun cancelReconnect() {
@@ -219,6 +243,7 @@ class SmsGatewayService : Service() {
         tokenRefreshRunnable?.let { handler.removeCallbacks(it) }
     }
 
+    // ---------- Вспомогательное ----------
     private fun acquireWakeLock() {
         if (checkSelfPermission(android.Manifest.permission.WAKE_LOCK) == PackageManager.PERMISSION_GRANTED) {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
