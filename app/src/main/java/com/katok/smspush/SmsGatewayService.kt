@@ -74,7 +74,13 @@ class SmsGatewayService : Service() {
                 MainActivity.appendLog("Сервис останавливается")
                 WebSocketManager.getInstance().disconnect()
                 cancelAllTimers()
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                // Остановка foreground с учётом API уровня
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
                 stopSelf()
             }
         }
@@ -226,7 +232,7 @@ class SmsGatewayService : Service() {
             return
         }
         reconnectAttempts++
-        val delay = 5000L * reconnectAttempts // экспоненциальная задержка
+        val delay = 5000L * reconnectAttempts
         reconnectRunnable = Runnable {
             MainActivity.appendLog("🔄 Попытка переподключения #$reconnectAttempts")
             tryRefreshAndReconnect()
