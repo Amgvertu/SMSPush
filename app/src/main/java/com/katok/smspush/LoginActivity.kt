@@ -14,6 +14,7 @@ import com.google.gson.annotations.SerializedName
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import java.io.IOException
+import com.katok.smspush.SmsGatewayService
 
 class LoginActivity : AppCompatActivity() {
 
@@ -89,8 +90,18 @@ class LoginActivity : AppCompatActivity() {
                                 loginResponse.data.accessToken!!,
                                 loginResponse.data.refreshToken!!
                             )
+
+// Перезапускаем сервис, чтобы он использовал свежие токены
+                            val stopIntent = Intent(this@LoginActivity, SmsGatewayService::class.java)
+                            stopService(stopIntent)
+
+                            val startIntent = Intent(this@LoginActivity, SmsGatewayService::class.java)
+                            startIntent.action = SmsGatewayService.ACTION_START
+                            startService(startIntent)
+
                             startActivity(Intent(this@LoginActivity, MainActivity::class.java))
                             finish()
+
                         } else {
                             showError(loginResponse.message ?: "Сервер не вернул токены")
                         }

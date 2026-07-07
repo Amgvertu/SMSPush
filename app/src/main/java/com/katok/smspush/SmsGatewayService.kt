@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.*
 import android.telephony.SmsManager
@@ -16,6 +17,8 @@ import com.google.gson.annotations.SerializedName
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import android.content.BroadcastReceiver
+
 
 class SmsGatewayService : Service() {
 
@@ -54,6 +57,22 @@ class SmsGatewayService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
 
+    private val tokenUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val accessToken = intent.getStringExtra("access_token")
+            val refreshToken = intent.getStringExtra("refresh_token")
+            if (accessToken != null && refreshToken != null) {
+                tokenManager.saveTokens(accessToken, refreshToken)
+                MainActivity.appendLog("🔄 Токены обновлены через Broadcast")
+                if (WebSocketManager.getInstance().isConnected()) {
+                    WebSocketManager.getInstance().disconnect()
+                    connectWebSocket()
+                }
+            }
+        }
+    }
+
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -66,12 +85,24 @@ class SmsGatewayService : Service() {
         }
         acquireWakeLock()
         MainActivity.appendLog("Сервис создан")
+
+        // Регистрация BroadcastReceiver с учётом версии Android
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            registerReceiver(tokenUpdateReceiver, IntentFilter("UPDATE_TOKENS"), Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(tokenUpdateReceiver, IntentFilter("UPDATE_TOKENS"))
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                startForeground(NOTIFICATION_ID, buildNotification("Шлюз запущен"))
+                try {
+                    startForeground(NOTIFICATION_ID, buildNotification("Шлюз запущен"))
+                } catch (e: Exception) {
+                    MainActivity.appendLog("❌ Ошибка startForeground: ${e.message}")
+                    e.printStackTrace()
+                }
                 MainActivity.appendLog("Сервис запущен")
                 requestBatteryOptimizationExemption()
                 connectWebSocket()
@@ -191,6 +222,18 @@ class SmsGatewayService : Service() {
     // ---------- Обновление токена ----------
     private fun tryRefreshAndReconnect() {
         if (isRefreshingToken) return
+        // Проверяем, истёк ли текущий access-токен
+        val currentToken = tokenManager.getAccessToken()
+        if (!tokenManager.isTokenExpired(currentToken)) {
+            MainActivity.appendLog("ℹ️ Токен ещё действителен, обновление не требуется")
+            // Если соединение разорвано, просто переподключаемся с текущим токеном
+            if (!WebSocketManager.getInstance().isConnected()) {
+                WebSocketManager.getInstance().resetState()
+                connectWebSocket()
+            }
+            return
+        }
+        MainActivity.appendLog("🔄 Токен истёк, обновляем...")
         isRefreshingToken = true
         Thread {
             val success = refreshToken()
@@ -220,12 +263,17 @@ class SmsGatewayService : Service() {
             val response = okHttpClient.newCall(request).execute()
             if (!response.isSuccessful) return false
             val body = response.body?.string() ?: return false
-            val tokenResponse = gson.fromJson(body, TokenRefreshResponse::class.java)
-            if (tokenResponse.accessToken != null && tokenResponse.refreshToken != null) {
-                tokenManager.saveTokens(tokenResponse.accessToken!!, tokenResponse.refreshToken!!)
-                MainActivity.appendLog("✅ Токены обновлены")
-                true
-            } else false
+            // Парсим обёртку ApiResponse<AuthResponse>
+            val apiResponse = gson.fromJson(body, ApiResponse::class.java) as ApiResponse<AuthResponse>
+            if (apiResponse.success && apiResponse.data != null) {
+                val auth = apiResponse.data
+                if (auth.accessToken != null && auth.refreshToken != null) {
+                    tokenManager.saveTokens(auth.accessToken, auth.refreshToken)
+                    MainActivity.appendLog("✅ Токены обновлены")
+                    return true
+                }
+            }
+            false
         } catch (e: Exception) {
             MainActivity.appendLog("❌ Ошибка обновления токена: ${e.message}")
             false
@@ -300,6 +348,7 @@ class SmsGatewayService : Service() {
         instance = null
         wakeLock?.let { if (it.isHeld) it.release() }
         MainActivity.appendLog("Сервис уничтожен")
+        unregisterReceiver(tokenUpdateReceiver)   // <-- добавить
         super.onDestroy()
     }
 

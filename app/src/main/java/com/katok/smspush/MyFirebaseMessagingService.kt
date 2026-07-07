@@ -8,6 +8,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import com.google.gson.reflect.TypeToken
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -109,16 +110,20 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .url("$BASE_URL/api/auth/refresh")
             .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
-
         return try {
             val response = OkHttpClient().newCall(request).execute()
             if (!response.isSuccessful) return false
             val body = response.body?.string() ?: return false
-            val data = Gson().fromJson(body, TokenRefreshResponse::class.java)
-            if (data.accessToken != null && data.refreshToken != null) {
-                tokenManager.saveTokens(data.accessToken!!, data.refreshToken!!)
-                true
-            } else false
+            val type = object : TypeToken<ApiResponse<AuthResponse>>() {}.type
+            val apiResponse: ApiResponse<AuthResponse> = Gson().fromJson(body, type)
+            if (apiResponse.success && apiResponse.data != null) {
+                val auth = apiResponse.data
+                if (auth.accessToken != null && auth.refreshToken != null) {
+                    tokenManager.saveTokens(auth.accessToken, auth.refreshToken)
+                    return true
+                }
+            }
+            false
         } catch (e: Exception) {
             Log.e(TAG, "Error refreshing token", e)
             false

@@ -53,6 +53,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        val intent = Intent("UPDATE_TOKENS")
+        intent.putExtra("access_token", tokenManager.getAccessToken())
+        intent.putExtra("refresh_token", tokenManager.getRefreshToken())
+        sendBroadcast(intent)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+        }
+
         tvLogs = findViewById(R.id.tvLogs)
         scrollView = findViewById(R.id.scrollView)
 
@@ -64,7 +73,11 @@ class MainActivity : AppCompatActivity() {
             appendLog("Нажата кнопка 'Запустить шлюз'")
             Intent(this, SmsGatewayService::class.java).also { intent ->
                 intent.action = SmsGatewayService.ACTION_START
-                startService(intent)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(intent)
+                } else {
+                    startService(intent)
+                }
             }
         }
 
