@@ -25,7 +25,6 @@ class WebSocketManager private constructor() {
         }
     }
 
-    // Интерфейс для уведомления внешнего мира о событиях
     interface Listener {
         fun onMessage(payload: String)
         fun onConnected()
@@ -42,12 +41,19 @@ class WebSocketManager private constructor() {
     private val compositeDisposable = CompositeDisposable()
 
     @Synchronized
+    fun resetState() {
+        MainActivity.appendLog("🔄 Сброс состояния WebSocket")
+        isConnected = false
+        isConnecting = false
+        compositeDisposable.clear()
+        stompClient?.disconnect()
+        stompClient = null
+    }
+
+    @Synchronized
     fun connect(url: String, token: String, listener: Listener) {
-        if (isConnected || isConnecting) {
-            MainActivity.appendLog("⚠️ Уже подключены или подключаемся")
-            return
-        }
-        disconnect() // гарантируем чистое состояние
+        // Принудительно сбрасываем состояние, чтобы можно было переподключиться
+        resetState()
 
         this.listener = listener
         isConnecting = true
@@ -94,22 +100,20 @@ class WebSocketManager private constructor() {
                     }
                     LifecycleEvent.Type.CLOSED -> {
                         MainActivity.appendLog("🔴 STOMP CLOSED")
-                        isConnected = false
-                        isConnecting = false
+                        // Сбрасываем состояние при закрытии
+                        resetState()
                         listener.onClosed()
                     }
                     LifecycleEvent.Type.ERROR -> {
                         MainActivity.appendLog("❌ STOMP ERROR: ${event.exception?.message}")
-                        isConnected = false
-                        isConnecting = false
+                        resetState()
                         listener.onError(event.exception)
                     }
                     else -> {}
                 }
             }, { error ->
                 MainActivity.appendLog("❌ Ошибка жизненного цикла: ${error.message}")
-                isConnected = false
-                isConnecting = false
+                resetState()
                 listener.onError(error)
             })?.let { compositeDisposable.add(it) }
 
@@ -120,11 +124,7 @@ class WebSocketManager private constructor() {
     @Synchronized
     fun disconnect() {
         MainActivity.appendLog("🔌 Отключение WebSocket")
-        compositeDisposable.clear()
-        stompClient?.disconnect()
-        stompClient = null
-        isConnected = false
-        isConnecting = false
+        resetState()
     }
 
     @Synchronized

@@ -27,7 +27,8 @@ class SmsGatewayService : Service() {
         const val NOTIFICATION_ID = 1
         const val WS_URL = "ws" + AppConfig.API_BASE_URL + "/ws"
         const val REFRESH_URL = "http" + AppConfig.API_BASE_URL + "/api/auth/refresh"
-        const val TOKEN_REFRESH_INTERVAL = 25 * 60 * 1000L
+        // Увеличиваем интервал обновления до 23 часов (при 7-дневном access-токене)
+        const val TOKEN_REFRESH_INTERVAL = 23 * 60 * 60 * 1000L
 
         private var instance: SmsGatewayService? = null
         fun getInstance(): SmsGatewayService? = instance
@@ -41,6 +42,8 @@ class SmsGatewayService : Service() {
     private var isRefreshingToken = false
     private var reconnectAttempts = 0
     private val MAX_RECONNECT_ATTEMPTS = 5
+
+    private lateinit var healthCheckRunnable: Runnable
 
     private lateinit var notificationManager: NotificationManager
     private val okHttpClient = OkHttpClient.Builder()
@@ -57,6 +60,10 @@ class SmsGatewayService : Service() {
         tokenManager = TokenManager(this)
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
+        healthCheckRunnable = Runnable {
+            checkHealth()
+            handler.postDelayed(healthCheckRunnable, 30000)
+        }
         acquireWakeLock()
         MainActivity.appendLog("Сервис создан")
     }
@@ -69,12 +76,13 @@ class SmsGatewayService : Service() {
                 requestBatteryOptimizationExemption()
                 connectWebSocket()
                 scheduleTokenRefresh()
+                startHealthCheck()   // ✅ Запускаем health check
             }
             ACTION_STOP -> {
                 MainActivity.appendLog("Сервис останавливается")
+                stopHealthCheck()    // ✅ Останавливаем health check
                 WebSocketManager.getInstance().disconnect()
                 cancelAllTimers()
-                // Остановка foreground с учётом API уровня
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                 } else {
@@ -85,6 +93,22 @@ class SmsGatewayService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    // ---------- Health Check ----------
+    private fun startHealthCheck() {
+        handler.post(healthCheckRunnable)
+    }
+
+    private fun stopHealthCheck() {
+        handler.removeCallbacks(healthCheckRunnable)
+    }
+
+    private fun checkHealth() {
+        if (!WebSocketManager.getInstance().isConnected() && !isRefreshingToken) {
+            MainActivity.appendLog("🩺 Обнаружено разорванное соединение, переподключаемся")
+            tryRefreshAndReconnect()
+        }
     }
 
     // ---------- WebSocket подключение ----------
@@ -164,7 +188,7 @@ class SmsGatewayService : Service() {
         }
     }
 
-    // ---------- Управление токенами и переподключением ----------
+    // ---------- Обновление токена ----------
     private fun tryRefreshAndReconnect() {
         if (isRefreshingToken) return
         isRefreshingToken = true
@@ -175,7 +199,7 @@ class SmsGatewayService : Service() {
                 if (success) {
                     reconnectAttempts = 0
                     MainActivity.appendLog("🔄 Токен обновлён, переподключаемся")
-                    WebSocketManager.getInstance().disconnect()
+                    WebSocketManager.getInstance().resetState()
                     connectWebSocket()
                 } else {
                     MainActivity.appendLog("❌ Не удалось обновить токен, повтор через 10 сек")
@@ -200,9 +224,8 @@ class SmsGatewayService : Service() {
             if (tokenResponse.accessToken != null && tokenResponse.refreshToken != null) {
                 tokenManager.saveTokens(tokenResponse.accessToken!!, tokenResponse.refreshToken!!)
                 MainActivity.appendLog("✅ Токены обновлены")
-                return true
-            }
-            false
+                true
+            } else false
         } catch (e: Exception) {
             MainActivity.appendLog("❌ Ошибка обновления токена: ${e.message}")
             false
@@ -247,6 +270,7 @@ class SmsGatewayService : Service() {
     private fun cancelAllTimers() {
         cancelReconnect()
         tokenRefreshRunnable?.let { handler.removeCallbacks(it) }
+        stopHealthCheck()
     }
 
     // ---------- Вспомогательное ----------
