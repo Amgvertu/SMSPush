@@ -47,11 +47,14 @@ class App : Application() {
 }
 
 ========= app/src/main/java/com/katok/smspush/AppConfig.kt =======
-package com.katok.smspush;
+package com.katok.smspush
 
 object AppConfig {
-    //const val API_BASE_URL = "s://varamy.online"
-    const val API_BASE_URL = "://192.168.0.119:8081"
+    // Для работы с реальным сервером используйте этот адрес
+    const val BASE_URL = "https://varamy.online"
+
+    // Для локальной отладки (если нужно) раскомментируйте следующую строку и закомментируйте верхнюю:
+    // const val BASE_URL = "http://192.168.0.119:8081"
 }
 
 ========= app/src/main/java/com/katok/smspush/AuthResponse.kt =======
@@ -393,6 +396,7 @@ class MainActivity : AppCompatActivity() {
 package com.katok.smspush
 
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -410,45 +414,60 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     companion object {
         private const val TAG = "FCM"
-        const val BASE_URL = "https://varamy.online"  // или ваш URL
+        // Используем тот же адрес сервера, что и в AppConfig
+        private val BASE_URL = AppConfig.BASE_URL
     }
 
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        MainActivity.appendLog("🔥 Новый FCM-токен: ${token.take(20)}...")
+        MainActivity.appendLog("🔥 Получен новый FCM-токен: $token")
         sendTokenToServer(token)
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
-        Log.d(TAG, "FCM message received")
+        Log.d(TAG, "Получено FCM-сообщение")
+        MainActivity.appendLog("📨 FCM сообщение: ${remoteMessage.data}")
 
         val data = remoteMessage.data
         val type = data["type"]
 
         if (type == "WAKE_UP") {
-            Log.d(TAG, "WAKE_UP received, reconnecting WebSocket")
+            MainActivity.appendLog("⏰ Получен WAKE_UP – пробуждаем шлюз")
+            // Запускаем сервис, если он не активен
             val intent = Intent(this, SmsGatewayService::class.java).apply {
                 action = SmsGatewayService.ACTION_START
             }
-            startService(intent)
-            // Даём сервису время инициализироваться
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+
+            // Даём сервису время инициализироваться (0.5 секунды)
             handler.postDelayed({
-                SmsGatewayService.getInstance()?.reconnectWebSocket()
+                val service = SmsGatewayService.getInstance()
+                if (service != null) {
+                    MainActivity.appendLog("🔄 Переподключаем WebSocket")
+                    service.reconnectWebSocket()
+                } else {
+                    // Если сервис ещё не создан – пробуем через 1 секунду
+                    MainActivity.appendLog("⚠️ Сервис ещё не готов, повтор через 1с")
+                    handler.postDelayed({
+                        SmsGatewayService.getInstance()?.reconnectWebSocket()
+                    }, 1000)
+                }
             }, 500)
         }
     }
 
-    /**
-     * Отправляет FCM-токен на сервер. При получении 401 обновляет access-токен и повторяет.
-     */
     private fun sendTokenToServer(token: String) {
         val tokenManager = TokenManager(this)
         var accessToken = tokenManager.getAccessToken()
         if (accessToken == null) {
-            Log.d(TAG, "No access token, cannot send FCM token")
+            MainActivity.appendLog("❌ Нет access-токена, нельзя отправить FCM-токен")
             return
         }
 
@@ -467,33 +486,29 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             try {
                 val response = OkHttpClient().newCall(request).execute()
                 if (response.isSuccessful) {
-                    Log.d(TAG, "FCM token sent to server")
+                    MainActivity.appendLog("✅ FCM-токен успешно отправлен на сервер")
                     return
                 } else if (response.code == 401 && retries > 1) {
-                    // Токен истёк – обновляем и повторяем
-                    Log.d(TAG, "Access token expired, refreshing...")
+                    MainActivity.appendLog("🔄 Access-токен истёк, обновляем...")
                     if (refreshAccessToken()) {
                         accessToken = tokenManager.getAccessToken()
                         retries--
                         continue
                     } else {
-                        Log.e(TAG, "Failed to refresh token")
+                        MainActivity.appendLog("❌ Не удалось обновить токен")
                         return
                     }
                 } else {
-                    Log.e(TAG, "Server responded: ${response.code}")
+                    MainActivity.appendLog("❌ Ошибка отправки FCM-токена: ${response.code}")
                     return
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to send FCM token", e)
+                MainActivity.appendLog("❌ Ошибка сети при отправке FCM: ${e.message}")
                 return
             }
         }
     }
 
-    /**
-     * Обновляет пару токенов, используя refresh-токен.
-     */
     private fun refreshAccessToken(): Boolean {
         val tokenManager = TokenManager(this)
         val refreshToken = tokenManager.getRefreshToken() ?: return false
@@ -517,15 +532,10 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             }
             false
         } catch (e: Exception) {
-            Log.e(TAG, "Error refreshing token", e)
+            Log.e(TAG, "Ошибка обновления токена", e)
             false
         }
     }
-
-    data class TokenRefreshResponse(
-        @SerializedName("accessToken") val accessToken: String?,
-        @SerializedName("refreshToken") val refreshToken: String?
-    )
 }
 
 ========= app/src/main/java/com/katok/smspush/SmsGatewayService.kt =======
@@ -559,8 +569,8 @@ class SmsGatewayService : Service() {
         const val ACTION_STOP = "stop"
         const val CHANNEL_ID = "sms_gateway_channel"
         const val NOTIFICATION_ID = 1
-        const val WS_URL = "ws" + AppConfig.API_BASE_URL + "/ws"
-        const val REFRESH_URL = "http" + AppConfig.API_BASE_URL + "/api/auth/refresh"
+        const val WS_URL = AppConfig.BASE_URL.replace("http", "ws") + "/ws"
+        const val REFRESH_URL = AppConfig.BASE_URL + "/api/auth/refresh"
         // Увеличиваем интервал обновления до 23 часов (при 7-дневном access-токене)
         const val TOKEN_REFRESH_INTERVAL = 23 * 60 * 60 * 1000L
 
@@ -603,10 +613,6 @@ class SmsGatewayService : Service() {
         }
     }
 
-    fun saveTokens(accessToken: String, refreshToken: String) {
-        Log.d("TokenManager", "saveTokens: success=$success, refresh=$refreshToken")
-    }
-
 
     override fun onCreate() {
         super.onCreate()
@@ -620,7 +626,13 @@ class SmsGatewayService : Service() {
         }
         acquireWakeLock()
         MainActivity.appendLog("Сервис создан")
-        registerReceiver(tokenUpdateReceiver, IntentFilter("UPDATE_TOKENS"))   // <-- добавить
+
+        // Регистрация BroadcastReceiver с учётом версии Android
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            registerReceiver(tokenUpdateReceiver, IntentFilter("UPDATE_TOKENS"), Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(tokenUpdateReceiver, IntentFilter("UPDATE_TOKENS"))
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -672,14 +684,22 @@ class SmsGatewayService : Service() {
     }
 
     // ---------- WebSocket подключение ----------
+    // app/src/main/java/com/katok/smspush/SmsGatewayService.kt
+
     private fun connectWebSocket() {
+        // Если уже подключены – выходим, чтобы не создавать дублирующее соединение
+        if (WebSocketManager.getInstance().isConnected()) {
+            MainActivity.appendLog("ℹ️ WebSocket уже подключён")
+            return
+        }
+
         val accessToken = tokenManager.getAccessToken()
         if (accessToken == null) {
             MainActivity.appendLog("❌ Нет токена! Авторизуйтесь.")
             return
         }
         reconnectAttempts = 0
-        MainActivity.appendLog("Подключение к WebSocket...")
+        MainActivity.appendLog("🌐 Подключение к WebSocket...")
         WebSocketManager.getInstance().connect(
             url = WS_URL,
             token = accessToken,
@@ -750,7 +770,20 @@ class SmsGatewayService : Service() {
 
     // ---------- Обновление токена ----------
     private fun tryRefreshAndReconnect() {
-        if (isRefreshingToken) return
+        if (isRefreshingToken) {
+            MainActivity.appendLog("⏳ Уже идёт обновление токена, пропускаем")
+            return
+        }
+        val currentToken = tokenManager.getAccessToken()
+        if (!tokenManager.isTokenExpired(currentToken)) {
+            MainActivity.appendLog("ℹ️ Токен ещё действителен, переподключаемся без обновления")
+            if (!WebSocketManager.getInstance().isConnected()) {
+                WebSocketManager.getInstance().resetState()
+                connectWebSocket()
+            }
+            return
+        }
+        MainActivity.appendLog("🔄 Токен истёк, обновляем...")
         isRefreshingToken = true
         Thread {
             val success = refreshToken()
@@ -758,7 +791,7 @@ class SmsGatewayService : Service() {
                 isRefreshingToken = false
                 if (success) {
                     reconnectAttempts = 0
-                    MainActivity.appendLog("🔄 Токен обновлён, переподключаемся")
+                    MainActivity.appendLog("✅ Токен обновлён, переподключаемся")
                     WebSocketManager.getInstance().resetState()
                     connectWebSocket()
                 } else {
@@ -821,6 +854,7 @@ class SmsGatewayService : Service() {
         }
         reconnectAttempts++
         val delay = 5000L * reconnectAttempts
+        MainActivity.appendLog("⏳ Планируем переподключение #$reconnectAttempts через ${delay/1000} сек")
         reconnectRunnable = Runnable {
             MainActivity.appendLog("🔄 Попытка переподключения #$reconnectAttempts")
             tryRefreshAndReconnect()
@@ -922,6 +956,22 @@ class TokenManager(context: Context) {
     fun clearTokens() {
         prefs.edit().clear().apply()
     }
+
+    fun isTokenExpired(token: String?): Boolean {
+        if (token == null) return true
+        return try {
+            val parts = token.split(".")
+            if (parts.size != 3) return true
+            val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE))
+            val json = org.json.JSONObject(payload)
+            val exp = json.getLong("exp") * 1000 // в миллисекунды
+            val now = System.currentTimeMillis()
+            // Добавляем буфер 5 минут, чтобы не обновлять слишком рано
+            now > exp - 5 * 60 * 1000
+        } catch (e: Exception) {
+            true // при ошибке считаем истёкшим
+        }
+    }
 }
 
 ========= app/src/main/java/com/katok/smspush/WebSocketManager.kt =======
@@ -973,7 +1023,16 @@ class WebSocketManager private constructor() {
         isConnected = false
         isConnecting = false
         compositeDisposable.clear()
-        stompClient?.disconnect()
+        // Попытаемся корректно отключиться
+        stompClient?.let {
+            it.disconnect()
+            // Даём время на закрытие (небольшая задержка)
+            try {
+                Thread.sleep(300)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
         stompClient = null
     }
 

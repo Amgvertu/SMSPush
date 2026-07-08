@@ -187,8 +187,8 @@ zipStorePath=wrapper/dists
 # Location of the SDK. This is only used by Gradle.
 # For customization when using a Version Control System, please read the
 # header note.
-#Wed Jul 01 18:05:47 NOVT 2026
-sdk.dir=C\:\\Users\\prora\\AppData\\Local\\Android\\Sdk
+#Thu Jul 02 10:04:36 NOVT 2026
+sdk.dir=C\:\\Users\\amgve\\AppData\\Local\\Android\\Sdk
 
 ========= settings.gradle.kts =======
 pluginManagement {

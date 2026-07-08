@@ -3,7 +3,7 @@ package com.katok.smspush
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.katok.smspush.SmsGatewayService
+import android.os.Build
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -11,7 +11,12 @@ class BootReceiver : BroadcastReceiver() {
             val serviceIntent = Intent(context, SmsGatewayService::class.java).apply {
                 action = SmsGatewayService.ACTION_START
             }
-            context.startService(serviceIntent)
+            // Для Android 8+ используем startForegroundService
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
         }
     }
 }

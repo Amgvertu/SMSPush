@@ -46,7 +46,16 @@ class WebSocketManager private constructor() {
         isConnected = false
         isConnecting = false
         compositeDisposable.clear()
-        stompClient?.disconnect()
+        // Попытаемся корректно отключиться
+        stompClient?.let {
+            it.disconnect()
+            // Даём время на закрытие (небольшая задержка)
+            try {
+                Thread.sleep(300)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
         stompClient = null
     }
 

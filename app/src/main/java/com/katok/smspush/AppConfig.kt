@@ -1,6 +1,9 @@
-package com.katok.smspush;
+package com.katok.smspush
 
 object AppConfig {
-    //const val API_BASE_URL = "s://varamy.online"
-    const val API_BASE_URL = "://192.168.0.119:8081"
+    // Для работы с реальным сервером используйте этот адрес
+    const val BASE_URL = "https://varamy.online"
+
+    // Для локальной отладки (если нужно) раскомментируйте следующую строку и закомментируйте верхнюю:
+    // const val BASE_URL = "http://192.168.0.119:8081"
 }

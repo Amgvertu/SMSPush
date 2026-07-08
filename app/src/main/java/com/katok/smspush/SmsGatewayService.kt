@@ -28,8 +28,8 @@ class SmsGatewayService : Service() {
         const val ACTION_STOP = "stop"
         const val CHANNEL_ID = "sms_gateway_channel"
         const val NOTIFICATION_ID = 1
-        const val WS_URL = "ws" + AppConfig.API_BASE_URL + "/ws"
-        const val REFRESH_URL = "http" + AppConfig.API_BASE_URL + "/api/auth/refresh"
+        val WS_URL = AppConfig.BASE_URL.replace("http", "ws") + "/ws"
+        val REFRESH_URL = AppConfig.BASE_URL + "/api/auth/refresh"
         // Увеличиваем интервал обновления до 23 часов (при 7-дневном access-токене)
         const val TOKEN_REFRESH_INTERVAL = 23 * 60 * 60 * 1000L
 
@@ -143,14 +143,22 @@ class SmsGatewayService : Service() {
     }
 
     // ---------- WebSocket подключение ----------
+    // app/src/main/java/com/katok/smspush/SmsGatewayService.kt
+
     private fun connectWebSocket() {
+        // Если уже подключены – выходим, чтобы не создавать дублирующее соединение
+        if (WebSocketManager.getInstance().isConnected()) {
+            MainActivity.appendLog("ℹ️ WebSocket уже подключён")
+            return
+        }
+
         val accessToken = tokenManager.getAccessToken()
         if (accessToken == null) {
             MainActivity.appendLog("❌ Нет токена! Авторизуйтесь.")
             return
         }
         reconnectAttempts = 0
-        MainActivity.appendLog("Подключение к WebSocket...")
+        MainActivity.appendLog("🌐 Подключение к WebSocket...")
         WebSocketManager.getInstance().connect(
             url = WS_URL,
             token = accessToken,
@@ -221,12 +229,13 @@ class SmsGatewayService : Service() {
 
     // ---------- Обновление токена ----------
     private fun tryRefreshAndReconnect() {
-        if (isRefreshingToken) return
-        // Проверяем, истёк ли текущий access-токен
+        if (isRefreshingToken) {
+            MainActivity.appendLog("⏳ Уже идёт обновление токена, пропускаем")
+            return
+        }
         val currentToken = tokenManager.getAccessToken()
         if (!tokenManager.isTokenExpired(currentToken)) {
-            MainActivity.appendLog("ℹ️ Токен ещё действителен, обновление не требуется")
-            // Если соединение разорвано, просто переподключаемся с текущим токеном
+            MainActivity.appendLog("ℹ️ Токен ещё действителен, переподключаемся без обновления")
             if (!WebSocketManager.getInstance().isConnected()) {
                 WebSocketManager.getInstance().resetState()
                 connectWebSocket()
@@ -241,7 +250,7 @@ class SmsGatewayService : Service() {
                 isRefreshingToken = false
                 if (success) {
                     reconnectAttempts = 0
-                    MainActivity.appendLog("🔄 Токен обновлён, переподключаемся")
+                    MainActivity.appendLog("✅ Токен обновлён, переподключаемся")
                     WebSocketManager.getInstance().resetState()
                     connectWebSocket()
                 } else {
@@ -304,6 +313,7 @@ class SmsGatewayService : Service() {
         }
         reconnectAttempts++
         val delay = 5000L * reconnectAttempts
+        MainActivity.appendLog("⏳ Планируем переподключение #$reconnectAttempts через ${delay/1000} сек")
         reconnectRunnable = Runnable {
             MainActivity.appendLog("🔄 Попытка переподключения #$reconnectAttempts")
             tryRefreshAndReconnect()
