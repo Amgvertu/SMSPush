@@ -49,12 +49,6 @@ class WebSocketManager private constructor() {
         // Попытаемся корректно отключиться
         stompClient?.let {
             it.disconnect()
-            // Даём время на закрытие (небольшая задержка)
-            try {
-                Thread.sleep(300)
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
-            }
         }
         stompClient = null
     }

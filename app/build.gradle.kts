@@ -25,6 +25,30 @@ android {
             )
         }
     }
+
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")   // файл должен лежать в app/
+            storePassword = "fghvbn123rty"
+            keyAlias = "smspush"
+            keyPassword = "fghvbn123rty"
+        }
+    }
+
+    // 2) Один блок buildTypes, где подключаем signingConfig к debug
+    buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
@@ -50,4 +74,5 @@ dependencies {
 
     implementation("com.google.firebase:firebase-messaging:23.4.1")
     implementation("com.google.firebase:firebase-core:21.1.1")
+    implementation("ru.rustore.sdk:pushclient:7.3.0")
 }

@@ -28,6 +28,16 @@ class TokenManager(context: Context) {
         prefs.edit().clear().apply()
     }
 
+    fun savePendingFcmToken(token: String) {
+        prefs.edit().putString("pending_fcm_token", token).apply()
+    }
+
+    fun getPendingFcmToken(): String? = prefs.getString("pending_fcm_token", null)
+
+    fun clearPendingFcmToken() {
+        prefs.edit().remove("pending_fcm_token").apply()
+    }
+
     fun isTokenExpired(token: String?): Boolean {
         if (token == null) return true
         return try {

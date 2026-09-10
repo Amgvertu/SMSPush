@@ -26,6 +26,30 @@ android {
             )
         }
     }
+
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")   // файл должен лежать в app/
+            storePassword = "fghvbn123rty"
+            keyAlias = "smspush"
+            keyPassword = "fghvbn123rty"
+        }
+    }
+
+    // 2) Один блок buildTypes, где подключаем signingConfig к debug
+    buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
@@ -51,6 +75,7 @@ dependencies {
 
     implementation("com.google.firebase:firebase-messaging:23.4.1")
     implementation("com.google.firebase:firebase-core:21.1.1")
+    implementation("ru.rustore.sdk:pushclient:7.3.0")
 }
 
 ========= app/src/main/AndroidManifest.xml =======
@@ -100,6 +125,14 @@ dependencies {
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="com.katok.smspush.RuStoreMessagingService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="ru.rustore.sdk.pushclient.MESSAGING_EVENT" />
             </intent-filter>
         </service>
 
@@ -187,8 +220,8 @@ zipStorePath=wrapper/dists
 # Location of the SDK. This is only used by Gradle.
 # For customization when using a Version Control System, please read the
 # header note.
-#Thu Jul 02 10:04:36 NOVT 2026
-sdk.dir=C\:\\Users\\amgve\\AppData\\Local\\Android\\Sdk
+#Wed Jul 01 18:05:47 NOVT 2026
+sdk.dir=C\:\\Users\\prora\\AppData\\Local\\Android\\Sdk
 
 ========= settings.gradle.kts =======
 pluginManagement {
@@ -213,6 +246,8 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven { url = uri("https://jitpack.io") }
+        // 👇 ДОБАВЛЕНО: репозиторий RuStore
+        maven { url = uri("https://artifactory-external.vkpartner.ru/artifactory/maven") }
     }
 }
 

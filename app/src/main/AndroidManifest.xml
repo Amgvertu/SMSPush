@@ -47,6 +47,14 @@
             </intent-filter>
         </service>
 
+        <service
+            android:name="com.katok.smspush.KatokRuStoreMessagingService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="ru.rustore.sdk.pushclient.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name="com.katok.smspush.BootReceiver"
             android:exported="true">

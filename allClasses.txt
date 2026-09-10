@@ -37,12 +37,25 @@ data class ApiResponse<T>(
 package com.katok.smspush
 
 import android.app.Application
+import android.util.Log
 import androidx.appcompat.app.AppCompatDelegate
+import ru.rustore.sdk.pushclient.RuStorePushClient
 
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
+
+        // Инициализация RuStore Push SDK
+        try {
+            RuStorePushClient.init(
+                application = this,
+                projectId = "McgN1q5Z1TpHNgUM54Ag-C96s4C8jsEf",
+            )
+            Log.d("SmsPushApp", "✅ RuStore Push SDK initialized")
+        } catch (e: Exception) {
+            Log.e("SmsPushApp", "❌ Failed to init RuStore Push SDK", e)
+        }
     }
 }
 
@@ -54,7 +67,7 @@ object AppConfig {
     const val BASE_URL = "https://varamy.online"
 
     // Для локальной отладки (если нужно) раскомментируйте следующую строку и закомментируйте верхнюю:
-    // const val BASE_URL = "http://192.168.0.119:8081"
+    //const val BASE_URL = "http://192.168.0.119:8082"
 }
 
 ========= app/src/main/java/com/katok/smspush/AuthResponse.kt =======
@@ -73,7 +86,7 @@ package com.katok.smspush
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.katok.smspush.SmsGatewayService
+import android.os.Build
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -81,7 +94,12 @@ class BootReceiver : BroadcastReceiver() {
             val serviceIntent = Intent(context, SmsGatewayService::class.java).apply {
                 action = SmsGatewayService.ACTION_START
             }
-            context.startService(serviceIntent)
+            // Для Android 8+ используем startForegroundService
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
         }
     }
 }
@@ -106,6 +124,7 @@ data class SmsResponse(
 package com.katok.smspush
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
@@ -119,9 +138,15 @@ import com.google.gson.annotations.SerializedName
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import java.io.IOException
-import com.katok.smspush.SmsGatewayService
 
 class LoginActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "LOGIN"
+        // Креды пользователя SMS_GATEWAY (совпадают с DatabaseInitializer на сервере)
+        private const val GATEWAY_PHONE = "+79999999999"
+        private const val GATEWAY_PASSWORD = "gateway123"
+    }
 
     private lateinit var etPhone: EditText
     private lateinit var etPassword: EditText
@@ -131,24 +156,123 @@ class LoginActivity : AppCompatActivity() {
 
     private val gson = Gson()
     private val client = OkHttpClient()
-
-    // Замените на актуальный адрес, если нужно
-    //private val BASE_URL = "http://192.168.0.119:8081"
-    private val BASE_URL = "http" + AppConfig.API_BASE_URL
+    private val BASE_URL = AppConfig.BASE_URL
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val tokenManager = TokenManager(this)
+        val accessToken = tokenManager.getAccessToken()
+        val refreshToken = tokenManager.getRefreshToken()
+
+        // 1. Токены уже есть — тихо уходим в MainActivity
+        if (!accessToken.isNullOrEmpty() && !refreshToken.isNullOrEmpty()) {
+            Log.d(TAG, "Tokens found, skipping login")
+            goToMainAndStartService()
+            return
+        }
+
+        // 2. Токенов нет — пробуем автологин под SMS_GATEWAY
+        Log.d(TAG, "No tokens, performing auto-login")
+        performAutoLogin()
+    }
+
+    /**
+     * Автологин с хардкодными кредами шлюза.
+     * Если по какой-то причине не сработает — покажем форму входа,
+     * чтобы устройство можно было "спасти" вручную.
+     */
+    private fun performAutoLogin() {
+        val json = """{"phone":"$GATEWAY_PHONE","password":"$GATEWAY_PASSWORD"}"""
+
+        val request = Request.Builder()
+            .url("$BASE_URL/api/auth/login")
+            .post(RequestBody.create("application/json".toMediaType(), json))
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "Auto-login network error: ${e.message}")
+                runOnUiThread {
+                    showLoginForm("Ошибка сети: ${e.message}")
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val body = response.body?.string() ?: ""
+                Log.d(TAG, "Auto-login response code: ${response.code}")
+
+                if (!response.isSuccessful) {
+                    runOnUiThread {
+                        showLoginForm("Автологин не удался (${response.code})")
+                    }
+                    return
+                }
+
+                try {
+                    val loginResponse = gson.fromJson(body, LoginResponse::class.java)
+                    if (loginResponse.success
+                        && loginResponse.data?.accessToken != null
+                        && loginResponse.data?.refreshToken != null
+                    ) {
+                        TokenManager(this@LoginActivity).saveTokens(
+                            loginResponse.data.accessToken!!,
+                            loginResponse.data.refreshToken!!
+                        )
+                        Log.d(TAG, "Auto-login successful")
+                        runOnUiThread { goToMainAndStartService() }
+                    } else {
+                        runOnUiThread {
+                            showLoginForm(loginResponse.message ?: "Сервер не вернул токены")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Auto-login parse error", e)
+                    runOnUiThread { showLoginForm("Ошибка разбора ответа: ${e.message}") }
+                }
+            }
+        })
+    }
+
+    /** Запуск сервиса шлюза + переход в MainActivity без анимации. */
+    private fun goToMainAndStartService() {
+        val startIntent = Intent(this, SmsGatewayService::class.java).apply {
+            action = SmsGatewayService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(startIntent)
+        } else {
+            startService(startIntent)
+        }
+        startActivity(Intent(this, MainActivity::class.java))
+        finish()
+    }
+
+    /**
+     * Показать форму входа (только как fallback при ошибке автологина).
+     * До этого момента пользователь не видит никакого UI.
+     */
+    private fun showLoginForm(errorMessage: String? = null) {
         setContentView(R.layout.activity_login)
 
-        etPhone = findViewById(R.id.etLogin)   // не меняем id в макете
+        etPhone = findViewById(R.id.etLogin)
         etPassword = findViewById(R.id.etPassword)
         btnLogin = findViewById(R.id.btnLogin)
         tvError = findViewById(R.id.tvError)
         progressBar = findViewById(R.id.progressBar)
 
         btnLogin.setOnClickListener { performLogin() }
+
+        if (!errorMessage.isNullOrEmpty()) {
+            tvError.text = errorMessage
+            tvError.visibility = View.VISIBLE
+        }
     }
 
+    /**
+     * Ручной логин (fallback). Показывается только если автологин упал —
+     * например, БД сервера пересоздали и SMS_GATEWAY-юзера нет.
+     */
     private fun performLogin() {
         val phone = etPhone.text.toString().trim()
         val password = etPassword.text.toString().trim()
@@ -161,8 +285,6 @@ class LoginActivity : AppCompatActivity() {
         tvError.visibility = View.GONE
 
         val json = """{"phone":"$phone","password":"$password"}"""
-        Log.d("LOGIN", "Request body: $json")
-
         val request = Request.Builder()
             .url("$BASE_URL/api/auth/login")
             .post(RequestBody.create("application/json".toMediaType(), json))
@@ -178,8 +300,6 @@ class LoginActivity : AppCompatActivity() {
 
             override fun onResponse(call: Call, response: Response) {
                 val responseBody = response.body?.string() ?: ""
-                Log.d("LOGIN", "Response code: ${response.code}, body: $responseBody")
-
                 runOnUiThread {
                     showLoading(false)
                     if (!response.isSuccessful) {
@@ -188,25 +308,22 @@ class LoginActivity : AppCompatActivity() {
                     }
                     try {
                         val loginResponse = gson.fromJson(responseBody, LoginResponse::class.java)
-                        if (loginResponse.success &&
-                            loginResponse.data?.accessToken != null &&
-                            loginResponse.data?.refreshToken != null) {
+                        if (loginResponse.success
+                            && loginResponse.data?.accessToken != null
+                            && loginResponse.data?.refreshToken != null
+                        ) {
                             TokenManager(this@LoginActivity).saveTokens(
                                 loginResponse.data.accessToken!!,
                                 loginResponse.data.refreshToken!!
                             )
 
-// Перезапускаем сервис, чтобы он использовал свежие токены
-                            val stopIntent = Intent(this@LoginActivity, SmsGatewayService::class.java)
-                            stopService(stopIntent)
+                            // Отправить pending FCM-токен, если копился до логина
+                            val pendingFcm = TokenManager(this@LoginActivity).getPendingFcmToken()
+                            if (pendingFcm != null) {
+                                sendPendingFcmToken(pendingFcm)
+                            }
 
-                            val startIntent = Intent(this@LoginActivity, SmsGatewayService::class.java)
-                            startIntent.action = SmsGatewayService.ACTION_START
-                            startService(startIntent)
-
-                            startActivity(Intent(this@LoginActivity, MainActivity::class.java))
-                            finish()
-
+                            goToMainAndStartService()
                         } else {
                             showError(loginResponse.message ?: "Сервер не вернул токены")
                         }
@@ -226,6 +343,27 @@ class LoginActivity : AppCompatActivity() {
     private fun showError(message: String) {
         tvError.text = message
         tvError.visibility = View.VISIBLE
+    }
+
+    private fun sendPendingFcmToken(fcmToken: String) {
+        val accessToken = TokenManager(this).getAccessToken() ?: return
+        val json = """{"token":"$fcmToken","platform":"FCM"}"""
+        val request = Request.Builder()
+            .url("$BASE_URL/api/push/register")
+            .addHeader("Authorization", "Bearer $accessToken")
+            .post(RequestBody.create("application/json; charset=utf-8".toMediaType(), json))
+            .build()
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "Не удалось отправить pending FCM: ${e.message}")
+            }
+            override fun onResponse(call: Call, response: Response) {
+                if (response.isSuccessful) {
+                    TokenManager(this@LoginActivity).clearPendingFcmToken()
+                    Log.d(TAG, "Pending FCM-токен отправлен")
+                }
+            }
+        })
     }
 
     // Структуры ответа сервера
@@ -467,17 +605,18 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val tokenManager = TokenManager(this)
         var accessToken = tokenManager.getAccessToken()
         if (accessToken == null) {
-            MainActivity.appendLog("❌ Нет access-токена, нельзя отправить FCM-токен")
+            MainActivity.appendLog("❌ Нет access-токена, сохраняем FCM-токен до логина")
+            tokenManager.savePendingFcmToken(token)
             return
         }
 
         var retries = 2
         while (retries > 0) {
             val request = Request.Builder()
-                .url("$BASE_URL/api/fcm/register")
+                .url("$BASE_URL/api/push/register")
                 .addHeader("Authorization", "Bearer $accessToken")
                 .post(
-                    """{"token":"$token"}""".toRequestBody(
+                    """{"token":"$token","platform":"FCM"}""".toRequestBody(
                         "application/json; charset=utf-8".toMediaType()
                     )
                 )
@@ -538,6 +677,140 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 }
 
+========= app/src/main/java/com/katok/smspush/RuStoreMessagingService.kt =======
+package com.katok.smspush
+
+import android.content.Intent
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import androidx.core.content.ContextCompat.startForegroundService
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import ru.rustore.sdk.pushclient.messaging.model.RemoteMessage
+
+class RuStoreMessagingService : RuStoreMessagingService() {
+
+    companion object {
+        private const val TAG = "RuStorePush"
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        Log.d(TAG, "🔥 New RuStore token: ${token.take(20)}...")
+        MainActivity.appendLog("🔥 RuStore-токен: ${token.take(20)}...")
+        sendTokenToServer(token)
+    }
+
+    override fun onMessageReceived(message: RemoteMessage) {
+        super.onMessageReceived(message)
+        val data = message.data
+        Log.d(TAG, "📩 RuStore message: $data")
+        MainActivity.appendLog("📨 RuStore сообщение: $data")
+
+        val type = data["type"]
+        if (type == "WAKE_UP") {
+            MainActivity.appendLog("⏰ RuStore WAKE_UP — пробуждаем шлюз")
+            val intent = Intent(this, SmsGatewayService::class.java).apply {
+                action = SmsGatewayService.ACTION_START
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+
+            handler.postDelayed({
+                val service = SmsGatewayService.getInstance()
+                if (service != null) {
+                    MainActivity.appendLog("🔄 Переподключаем WebSocket")
+                    service.reconnectWebSocket()
+                } else {
+                    handler.postDelayed({
+                        SmsGatewayService.getInstance()?.reconnectWebSocket()
+                    }, 1000)
+                }
+            }, 500)
+        }
+    }
+
+    private fun sendTokenToServer(token: String) {
+        val tokenManager = TokenManager(this)
+        var accessToken = tokenManager.getAccessToken()
+        if (accessToken == null) {
+            MainActivity.appendLog("❌ Нет access-токена, сохраняем RuStore-токен до логина")
+            tokenManager.savePendingFcmToken(token)   // используем ту же функцию, что и для FCM
+            return
+        }
+
+        var retries = 2
+        while (retries > 0) {
+            val request = okhttp3.Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/push/register")
+                .addHeader("Authorization", "Bearer $accessToken")
+                .post(
+                    """{"token":"$token","platform":"RUSTORE"}"""
+                        .toRequestBody("application/json; charset=utf-8".toMediaType())
+                )
+                .build()
+
+            try {
+                val response = okhttp3.OkHttpClient().newCall(request).execute()
+                if (response.isSuccessful) {
+                    MainActivity.appendLog("✅ RuStore-токен отправлен на сервер")
+                    return
+                } else if (response.code == 401 && retries > 1) {
+                    MainActivity.appendLog("🔄 Access-токен истёк, обновляем...")
+                    if (refreshAccessToken(tokenManager)) {
+                        accessToken = tokenManager.getAccessToken()
+                        retries--
+                        continue
+                    } else {
+                        return
+                    }
+                } else {
+                    MainActivity.appendLog("❌ Ошибка отправки RuStore-токена: ${response.code}")
+                    return
+                }
+            } catch (e: Exception) {
+                MainActivity.appendLog("❌ Сеть: ${e.message}")
+                return
+            }
+        }
+    }
+
+    private fun refreshAccessToken(tokenManager: TokenManager): Boolean {
+        val refreshToken = tokenManager.getRefreshToken() ?: return false
+        val json = """{"refreshToken":"$refreshToken"}"""
+        val request = okhttp3.Request.Builder()
+            .url("${AppConfig.BASE_URL}/api/auth/refresh")
+            .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+        return try {
+            val response = okhttp3.OkHttpClient().newCall(request).execute()
+            if (!response.isSuccessful) return false
+            val body = response.body?.string() ?: return false
+            val type = object : com.google.gson.reflect.TypeToken<ApiResponse<AuthResponse>>() {}.type
+            val apiResponse: ApiResponse<AuthResponse> =
+                com.google.gson.Gson().fromJson(body, type)
+            if (apiResponse.success && apiResponse.data != null) {
+                val auth = apiResponse.data
+                if (auth.accessToken.isNotEmpty() && auth.refreshToken.isNotEmpty()) {
+                    tokenManager.saveTokens(auth.accessToken, auth.refreshToken)
+                    return true
+                }
+            }
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка обновления токена", e)
+            false
+        }
+    }
+}
+
 ========= app/src/main/java/com/katok/smspush/SmsGatewayService.kt =======
 package com.katok.smspush
 
@@ -569,8 +842,8 @@ class SmsGatewayService : Service() {
         const val ACTION_STOP = "stop"
         const val CHANNEL_ID = "sms_gateway_channel"
         const val NOTIFICATION_ID = 1
-        const val WS_URL = AppConfig.BASE_URL.replace("http", "ws") + "/ws"
-        const val REFRESH_URL = AppConfig.BASE_URL + "/api/auth/refresh"
+        val WS_URL = AppConfig.BASE_URL.replace("http", "ws") + "/ws"
+        val REFRESH_URL = AppConfig.BASE_URL + "/api/auth/refresh"
         // Увеличиваем интервал обновления до 23 часов (при 7-дневном access-токене)
         const val TOKEN_REFRESH_INTERVAL = 23 * 60 * 60 * 1000L
 
@@ -957,6 +1230,16 @@ class TokenManager(context: Context) {
         prefs.edit().clear().apply()
     }
 
+    fun savePendingFcmToken(token: String) {
+        prefs.edit().putString("pending_fcm_token", token).apply()
+    }
+
+    fun getPendingFcmToken(): String? = prefs.getString("pending_fcm_token", null)
+
+    fun clearPendingFcmToken() {
+        prefs.edit().remove("pending_fcm_token").apply()
+    }
+
     fun isTokenExpired(token: String?): Boolean {
         if (token == null) return true
         return try {
@@ -1026,12 +1309,6 @@ class WebSocketManager private constructor() {
         // Попытаемся корректно отключиться
         stompClient?.let {
             it.disconnect()
-            // Даём время на закрытие (небольшая задержка)
-            try {
-                Thread.sleep(300)
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
-            }
         }
         stompClient = null
     }

@@ -5,43 +5,40 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.google.firebase.messaging.FirebaseMessagingService
-import com.google.firebase.messaging.RemoteMessage
-import com.google.gson.Gson
-import com.google.gson.annotations.SerializedName
-import com.google.gson.reflect.TypeToken
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import ru.rustore.sdk.pushclient.messaging.model.RemoteMessage
+import ru.rustore.sdk.pushclient.messaging.service.RuStoreMessagingService
 
-class MyFirebaseMessagingService : FirebaseMessagingService() {
+/**
+ * Наследник RuStoreMessagingService из SDK.
+ * Назван иначе, чтобы не конфликтовать с именем базового класса.
+ */
+class KatokRuStoreMessagingService : RuStoreMessagingService() {
 
     companion object {
-        private const val TAG = "FCM"
-        // Используем тот же адрес сервера, что и в AppConfig
-        private val BASE_URL = AppConfig.BASE_URL
+        private const val TAG = "RuStorePush"
     }
 
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        MainActivity.appendLog("🔥 Получен новый FCM-токен: $token")
+        Log.d(TAG, "🔥 New RuStore token: ${token.take(20)}...")
+        MainActivity.appendLog("🔥 RuStore-токен: ${token.take(20)}...")
         sendTokenToServer(token)
     }
 
-    override fun onMessageReceived(remoteMessage: RemoteMessage) {
-        super.onMessageReceived(remoteMessage)
-        Log.d(TAG, "Получено FCM-сообщение")
-        MainActivity.appendLog("📨 FCM сообщение: ${remoteMessage.data}")
+    override fun onMessageReceived(message: RemoteMessage) {
+        super.onMessageReceived(message)
+        val data = message.data
+        Log.d(TAG, "📩 RuStore message: $data")
+        MainActivity.appendLog("📨 RuStore сообщение: $data")
 
-        val data = remoteMessage.data
         val type = data["type"]
-
         if (type == "WAKE_UP") {
-            MainActivity.appendLog("⏰ Получен WAKE_UP – пробуждаем шлюз")
-            // Запускаем сервис, если он не активен
+            MainActivity.appendLog("⏰ RuStore WAKE_UP — пробуждаем шлюз")
+
             val intent = Intent(this, SmsGatewayService::class.java).apply {
                 action = SmsGatewayService.ACTION_START
             }
@@ -51,15 +48,12 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 startService(intent)
             }
 
-            // Даём сервису время инициализироваться (0.5 секунды)
             handler.postDelayed({
                 val service = SmsGatewayService.getInstance()
                 if (service != null) {
                     MainActivity.appendLog("🔄 Переподключаем WebSocket")
                     service.reconnectWebSocket()
                 } else {
-                    // Если сервис ещё не создан – пробуем через 1 секунду
-                    MainActivity.appendLog("⚠️ Сервис ещё не готов, повтор через 1с")
                     handler.postDelayed({
                         SmsGatewayService.getInstance()?.reconnectWebSocket()
                     }, 1000)
@@ -72,66 +66,64 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val tokenManager = TokenManager(this)
         var accessToken = tokenManager.getAccessToken()
         if (accessToken == null) {
-            MainActivity.appendLog("❌ Нет access-токена, сохраняем FCM-токен до логина")
-            tokenManager.savePendingFcmToken(token)
+            MainActivity.appendLog("❌ Нет access-токена, сохраняем RuStore-токен до логина")
+            tokenManager.savePendingFcmToken(token) // используем тот же key, что и для FCM
             return
         }
 
         var retries = 2
         while (retries > 0) {
-            val request = Request.Builder()
-                .url("$BASE_URL/api/push/register")
+            val request = okhttp3.Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/push/register")
                 .addHeader("Authorization", "Bearer $accessToken")
                 .post(
-                    """{"token":"$token","platform":"FCM"}""".toRequestBody(
-                        "application/json; charset=utf-8".toMediaType()
-                    )
+                    """{"token":"$token","platform":"RUSTORE"}"""
+                        .toRequestBody("application/json; charset=utf-8".toMediaType())
                 )
                 .build()
 
             try {
-                val response = OkHttpClient().newCall(request).execute()
+                val response = okhttp3.OkHttpClient().newCall(request).execute()
                 if (response.isSuccessful) {
-                    MainActivity.appendLog("✅ FCM-токен успешно отправлен на сервер")
+                    MainActivity.appendLog("✅ RuStore-токен отправлен на сервер")
                     return
                 } else if (response.code == 401 && retries > 1) {
                     MainActivity.appendLog("🔄 Access-токен истёк, обновляем...")
-                    if (refreshAccessToken()) {
+                    if (refreshAccessToken(tokenManager)) {
                         accessToken = tokenManager.getAccessToken()
                         retries--
                         continue
                     } else {
-                        MainActivity.appendLog("❌ Не удалось обновить токен")
                         return
                     }
                 } else {
-                    MainActivity.appendLog("❌ Ошибка отправки FCM-токена: ${response.code}")
+                    MainActivity.appendLog("❌ Ошибка отправки RuStore-токена: ${response.code}")
                     return
                 }
             } catch (e: Exception) {
-                MainActivity.appendLog("❌ Ошибка сети при отправке FCM: ${e.message}")
+                MainActivity.appendLog("❌ Сеть: ${e.message}")
                 return
             }
         }
     }
 
-    private fun refreshAccessToken(): Boolean {
-        val tokenManager = TokenManager(this)
+    private fun refreshAccessToken(tokenManager: TokenManager): Boolean {
         val refreshToken = tokenManager.getRefreshToken() ?: return false
         val json = """{"refreshToken":"$refreshToken"}"""
-        val request = Request.Builder()
-            .url("$BASE_URL/api/auth/refresh")
+        val request = okhttp3.Request.Builder()
+            .url("${AppConfig.BASE_URL}/api/auth/refresh")
             .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
         return try {
-            val response = OkHttpClient().newCall(request).execute()
+            val response = okhttp3.OkHttpClient().newCall(request).execute()
             if (!response.isSuccessful) return false
             val body = response.body?.string() ?: return false
-            val type = object : TypeToken<ApiResponse<AuthResponse>>() {}.type
-            val apiResponse: ApiResponse<AuthResponse> = Gson().fromJson(body, type)
+            val type = object : com.google.gson.reflect.TypeToken<ApiResponse<AuthResponse>>() {}.type
+            val apiResponse: ApiResponse<AuthResponse> =
+                com.google.gson.Gson().fromJson(body, type)
             if (apiResponse.success && apiResponse.data != null) {
                 val auth = apiResponse.data
-                if (auth.accessToken != null && auth.refreshToken != null) {
+                if (auth.accessToken.isNotEmpty() && auth.refreshToken.isNotEmpty()) {
                     tokenManager.saveTokens(auth.accessToken, auth.refreshToken)
                     return true
                 }
