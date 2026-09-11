@@ -3,6 +3,8 @@ package com.katok.smspush
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.widget.Button
@@ -22,7 +24,11 @@ class LoginActivity : AppCompatActivity() {
         private const val TAG = "LOGIN"
         // Креды пользователя SMS_GATEWAY (совпадают с DatabaseInitializer на сервере)
         private const val GATEWAY_PHONE = "+79999999999"
-        private const val GATEWAY_PASSWORD = "gateway123"
+        private const val GATEWAY_PASSWORD = "fghvbn123rty"
+
+        // Параметры автологина
+        private const val MAX_AUTO_LOGIN_ATTEMPTS = 5         // сколько раз пробовать
+        private const val AUTO_LOGIN_RETRY_DELAY_MS = 3000L   // пауза между попытками
     }
 
     private lateinit var etPhone: EditText
@@ -34,6 +40,9 @@ class LoginActivity : AppCompatActivity() {
     private val gson = Gson()
     private val client = OkHttpClient()
     private val BASE_URL = AppConfig.BASE_URL
+    private val uiHandler = Handler(Looper.getMainLooper())
+
+    private var autoLoginAttempt = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,10 +65,15 @@ class LoginActivity : AppCompatActivity() {
 
     /**
      * Автологин с хардкодными кредами шлюза.
-     * Если по какой-то причине не сработает — покажем форму входа,
-     * чтобы устройство можно было "спасти" вручную.
+     * До MAX_AUTO_LOGIN_ATTEMPTS попыток с паузой AUTO_LOGIN_RETRY_DELAY_MS,
+     * чтобы пережить момент, когда Wi-Fi ещё не поднялся при старте приложения.
      */
     private fun performAutoLogin() {
+        if (isFinishing || isDestroyed) return
+
+        autoLoginAttempt++
+        Log.d(TAG, "Auto-login attempt #$autoLoginAttempt")
+
         val json = """{"phone":"$GATEWAY_PHONE","password":"$GATEWAY_PASSWORD"}"""
 
         val request = Request.Builder()
@@ -69,19 +83,25 @@ class LoginActivity : AppCompatActivity() {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Auto-login network error: ${e.message}")
-                runOnUiThread {
-                    showLoginForm("Ошибка сети: ${e.message}")
-                }
+                Log.e(TAG, "Auto-login network error (attempt #$autoLoginAttempt): ${e.message}")
+                scheduleAutoLoginRetry("Ошибка сети: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
                 val body = response.body?.string() ?: ""
-                Log.d(TAG, "Auto-login response code: ${response.code}")
+                Log.d(TAG, "Auto-login response code (attempt #$autoLoginAttempt): ${response.code}")
 
                 if (!response.isSuccessful) {
-                    runOnUiThread {
-                        showLoginForm("Автологин не удался (${response.code})")
+                    // 5xx и 408/429 — сервер/сеть «приходят в себя», ретраим.
+                    // 400/401/403 — неверные креды, ретраить бессмысленно.
+                    if (response.code >= 500 || response.code == 408 || response.code == 429) {
+                        scheduleAutoLoginRetry("Сервер недоступен (${response.code})")
+                    } else {
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                showLoginForm("Автологин не удался (${response.code})")
+                            }
+                        }
                     }
                     return
                 }
@@ -97,21 +117,53 @@ class LoginActivity : AppCompatActivity() {
                             loginResponse.data.refreshToken!!
                         )
                         Log.d(TAG, "Auto-login successful")
-                        runOnUiThread { goToMainAndStartService() }
-                    } else {
                         runOnUiThread {
-                            showLoginForm(loginResponse.message ?: "Сервер не вернул токены")
+                            if (!isFinishing && !isDestroyed) {
+                                goToMainAndStartService()
+                            }
+                        }
+                    } else {
+                        // Сервер ответил успешно, но без токенов — покажем форму.
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                showLoginForm(loginResponse.message ?: "Сервер не вернул токены")
+                            }
                         }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Auto-login parse error", e)
-                    runOnUiThread { showLoginForm("Ошибка разбора ответа: ${e.message}") }
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            showLoginForm("Ошибка разбора ответа: ${e.message}")
+                        }
+                    }
                 }
             }
         })
     }
 
-    /** Запуск сервиса шлюза + переход в MainActivity без анимации. */
+    private fun scheduleAutoLoginRetry(lastErrorMessage: String) {
+        if (isFinishing || isDestroyed) return
+
+        if (autoLoginAttempt >= MAX_AUTO_LOGIN_ATTEMPTS) {
+            Log.w(TAG, "Auto-login failed after $MAX_AUTO_LOGIN_ATTEMPTS attempts: $lastErrorMessage")
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    showLoginForm(lastErrorMessage)
+                }
+            }
+            return
+        }
+
+        Log.d(TAG, "Scheduling auto-login retry in ${AUTO_LOGIN_RETRY_DELAY_MS}ms")
+        uiHandler.postDelayed({
+            if (!isFinishing && !isDestroyed) {
+                performAutoLogin()
+            }
+        }, AUTO_LOGIN_RETRY_DELAY_MS)
+    }
+
+    /** Запуск сервиса шлюза + переход в MainActivity. */
     private fun goToMainAndStartService() {
         val startIntent = Intent(this, SmsGatewayService::class.java).apply {
             action = SmsGatewayService.ACTION_START
@@ -125,11 +177,9 @@ class LoginActivity : AppCompatActivity() {
         finish()
     }
 
-    /**
-     * Показать форму входа (только как fallback при ошибке автологина).
-     * До этого момента пользователь не видит никакого UI.
-     */
+    /** Показать форму входа (fallback, если автологин не сработал). */
     private fun showLoginForm(errorMessage: String? = null) {
+        // setContentView мог уже вызываться — не страшно, повторный вызов перезапишет
         setContentView(R.layout.activity_login)
 
         etPhone = findViewById(R.id.etLogin)
@@ -137,6 +187,10 @@ class LoginActivity : AppCompatActivity() {
         btnLogin = findViewById(R.id.btnLogin)
         tvError = findViewById(R.id.tvError)
         progressBar = findViewById(R.id.progressBar)
+
+        // Заранее заполняем поля, чтобы оператору не пришлось вводить руками
+        etPhone.setText(GATEWAY_PHONE)
+        etPassword.setText(GATEWAY_PASSWORD)
 
         btnLogin.setOnClickListener { performLogin() }
 
@@ -146,10 +200,7 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Ручной логин (fallback). Показывается только если автологин упал —
-     * например, БД сервера пересоздали и SMS_GATEWAY-юзера нет.
-     */
+    /** Ручной логин (fallback). */
     private fun performLogin() {
         val phone = etPhone.text.toString().trim()
         val password = etPassword.text.toString().trim()
@@ -170,14 +221,17 @@ class LoginActivity : AppCompatActivity() {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
-                    showLoading(false)
-                    showError("Ошибка сети: ${e.message}")
+                    if (!isFinishing && !isDestroyed) {
+                        showLoading(false)
+                        showError("Ошибка сети: ${e.message}")
+                    }
                 }
             }
 
             override fun onResponse(call: Call, response: Response) {
                 val responseBody = response.body?.string() ?: ""
                 runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
                     showLoading(false)
                     if (!response.isSuccessful) {
                         showError("Ошибка входа (код ${response.code}): ${responseBody.take(100)}")
@@ -241,6 +295,11 @@ class LoginActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    override fun onDestroy() {
+        uiHandler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     // Структуры ответа сервера

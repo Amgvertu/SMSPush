@@ -100,7 +100,7 @@ class MainActivity : AppCompatActivity() {
 
 
         // Запрос на отключение оптимизации батареи
-        requestBatteryOptimization()
+        //requestBatteryOptimization()
     }
 
     override fun onResume() {
