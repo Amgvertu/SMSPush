@@ -31,6 +31,7 @@ class SmsGatewayService : Service() {
         val WS_URL = AppConfig.BASE_URL.replace("http", "ws") + "/ws"
         val REFRESH_URL = AppConfig.BASE_URL + "/api/auth/refresh"
         // Увеличиваем интервал обновления до 23 часов (при 7-дневном access-токене)
+        val LOGIN_URL = AppConfig.BASE_URL + "/api/auth/login"
         const val TOKEN_REFRESH_INTERVAL = 23 * 60 * 60 * 1000L
 
         private var instance: SmsGatewayService? = null
@@ -87,9 +88,15 @@ class SmsGatewayService : Service() {
         MainActivity.appendLog("Сервис создан")
 
         // Регистрация BroadcastReceiver с учётом версии Android
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            registerReceiver(tokenUpdateReceiver, IntentFilter("UPDATE_TOKENS"), Context.RECEIVER_NOT_EXPORTED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(
+                tokenUpdateReceiver,
+                IntentFilter("UPDATE_TOKENS"),
+                Context.RECEIVER_NOT_EXPORTED
+            )
         } else {
+            // На API 26-32 флаг не поддерживается, но и не требуется.
+            @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(tokenUpdateReceiver, IntentFilter("UPDATE_TOKENS"))
         }
     }
@@ -233,6 +240,7 @@ class SmsGatewayService : Service() {
             MainActivity.appendLog("⏳ Уже идёт обновление токена, пропускаем")
             return
         }
+
         val currentToken = tokenManager.getAccessToken()
         if (!tokenManager.isTokenExpired(currentToken)) {
             MainActivity.appendLog("ℹ️ Токен ещё действителен, переподключаемся без обновления")
@@ -242,23 +250,77 @@ class SmsGatewayService : Service() {
             }
             return
         }
+
         MainActivity.appendLog("🔄 Токен истёк, обновляем...")
         isRefreshingToken = true
+
         Thread {
-            val success = refreshToken()
-            handler.post {
-                isRefreshingToken = false
-                if (success) {
+            val refreshOk = refreshToken()
+            if (refreshOk) {
+                handler.post {
+                    isRefreshingToken = false
                     reconnectAttempts = 0
                     MainActivity.appendLog("✅ Токен обновлён, переподключаемся")
                     WebSocketManager.getInstance().resetState()
                     connectWebSocket()
+                }
+                return@Thread
+            }
+
+            // Refresh не сработал (refresh-токен просрочен) — делаем полный логин.
+            MainActivity.appendLog("🔄 Refresh не сработал, пробуем полный автологин...")
+            val loginOk = performFullLogin()
+
+            handler.post {
+                isRefreshingToken = false
+                if (loginOk) {
+                    reconnectAttempts = 0
+                    MainActivity.appendLog("✅ Автологин успешен, переподключаемся")
+                    WebSocketManager.getInstance().resetState()
+                    connectWebSocket()
                 } else {
-                    MainActivity.appendLog("❌ Не удалось обновить токен, повтор через 10 сек")
+                    MainActivity.appendLog("❌ Автологин не удался, повтор через 10 сек")
                     scheduleReconnect()
                 }
             }
         }.start()
+    }
+
+    /**
+     * Полный логин под SMS_GATEWAY. Используется как fallback,
+     * когда refresh-токен просрочен и его нельзя обновить.
+     */
+    private fun performFullLogin(): Boolean {
+        return try {
+            val json = """{"phone":"${GatewayCredentials.PHONE}","password":"${GatewayCredentials.PASSWORD}"}"""
+            val request = okhttp3.Request.Builder()
+                .url(LOGIN_URL)
+                .post(okhttp3.RequestBody.create("application/json; charset=utf-8".toMediaType(), json))
+                .build()
+
+            val response = okHttpClient.newCall(request).execute()
+            if (!response.isSuccessful) {
+                MainActivity.appendLog("❌ Автологин: HTTP ${response.code}")
+                return false
+            }
+
+            val body = response.body?.string() ?: return false
+            val type = object : com.google.gson.reflect.TypeToken<ApiResponse<AuthResponse>>() {}.type
+            val apiResponse: ApiResponse<AuthResponse> = gson.fromJson(body, type)
+
+            if (apiResponse.success && apiResponse.data != null) {
+                val auth = apiResponse.data
+                if (auth.accessToken.isNotEmpty() && auth.refreshToken.isNotEmpty()) {
+                    tokenManager.saveTokens(auth.accessToken, auth.refreshToken)
+                    return true
+                }
+            }
+            MainActivity.appendLog("❌ Автологин: пустой ответ")
+            false
+        } catch (e: Exception) {
+            MainActivity.appendLog("❌ Автологин ошибка: ${e.message}")
+            false
+        }
     }
 
     private fun refreshToken(): Boolean {
@@ -307,13 +369,19 @@ class SmsGatewayService : Service() {
     private fun scheduleReconnect() {
         cancelReconnect()
         if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            MainActivity.appendLog("⚠️ Превышено число попыток переподключения")
+            MainActivity.appendLog("⚠️ Превышено число попыток, повтор через 5 минут")
             reconnectAttempts = 0
+            // Не сдаёмся навсегда — планируем полный рестарт через 5 минут.
+            reconnectRunnable = Runnable {
+                MainActivity.appendLog("🔄 Периодическая попытка после долгой паузы")
+                tryRefreshAndReconnect()
+            }
+            handler.postDelayed(reconnectRunnable!!, 5 * 60 * 1000L)
             return
         }
         reconnectAttempts++
         val delay = 5000L * reconnectAttempts
-        MainActivity.appendLog("⏳ Планируем переподключение #$reconnectAttempts через ${delay/1000} сек")
+        MainActivity.appendLog("⏳ Планируем переподключение #$reconnectAttempts через ${delay / 1000} сек")
         reconnectRunnable = Runnable {
             MainActivity.appendLog("🔄 Попытка переподключения #$reconnectAttempts")
             tryRefreshAndReconnect()

@@ -43,14 +43,24 @@ class TokenManager(context: Context) {
         return try {
             val parts = token.split(".")
             if (parts.size != 3) return true
-            val payload = String(android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE))
+
+            val payloadBytes = android.util.Base64.decode(
+                parts[1],
+                android.util.Base64.URL_SAFE or
+                        android.util.Base64.NO_WRAP or
+                        android.util.Base64.NO_PADDING
+            )
+            val payload = String(payloadBytes, Charsets.UTF_8)
             val json = org.json.JSONObject(payload)
-            val exp = json.getLong("exp") * 1000 // в миллисекунды
+            val exp = json.getLong("exp") * 1000
             val now = System.currentTimeMillis()
-            // Добавляем буфер 5 минут, чтобы не обновлять слишком рано
-            now > exp - 5 * 60 * 1000
+            // Буфер 5 минут, чтобы не обновлять слишком рано
+            val expired = now > exp - 5 * 60 * 1000
+            Log.d("TokenManager", "isTokenExpired: exp=$exp, now=$now, expired=$expired")
+            expired
         } catch (e: Exception) {
-            true // при ошибке считаем истёкшим
+            Log.e("TokenManager", "isTokenExpired error: ${e.message}", e)
+            true
         }
     }
 }

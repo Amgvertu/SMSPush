@@ -22,9 +22,6 @@ class LoginActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "LOGIN"
-        // Креды пользователя SMS_GATEWAY (совпадают с DatabaseInitializer на сервере)
-        private const val GATEWAY_PHONE = "+79999999999"
-        private const val GATEWAY_PASSWORD = "fghvbn123rty"
 
         // Параметры автологина
         private const val MAX_AUTO_LOGIN_ATTEMPTS = 5         // сколько раз пробовать
@@ -51,15 +48,17 @@ class LoginActivity : AppCompatActivity() {
         val accessToken = tokenManager.getAccessToken()
         val refreshToken = tokenManager.getRefreshToken()
 
-        // 1. Токены уже есть — тихо уходим в MainActivity
-        if (!accessToken.isNullOrEmpty() && !refreshToken.isNullOrEmpty()) {
-            Log.d(TAG, "Tokens found, skipping login")
+// 1. Токены уже есть и access ещё живой — тихо уходим в MainActivity
+        if (!accessToken.isNullOrEmpty()
+            && !refreshToken.isNullOrEmpty()
+            && !tokenManager.isTokenExpired(accessToken)) {
+            Log.d(TAG, "Tokens found and valid, skipping login")
             goToMainAndStartService()
             return
         }
 
-        // 2. Токенов нет — пробуем автологин под SMS_GATEWAY
-        Log.d(TAG, "No tokens, performing auto-login")
+// 2. Токенов нет или access просрочен — пробуем автологин
+        Log.d(TAG, "No tokens or access expired, performing auto-login")
         performAutoLogin()
     }
 
@@ -74,7 +73,7 @@ class LoginActivity : AppCompatActivity() {
         autoLoginAttempt++
         Log.d(TAG, "Auto-login attempt #$autoLoginAttempt")
 
-        val json = """{"phone":"$GATEWAY_PHONE","password":"$GATEWAY_PASSWORD"}"""
+        val json = """{"phone":"${GatewayCredentials.PHONE}","password":"${GatewayCredentials.PASSWORD}"}"""
 
         val request = Request.Builder()
             .url("$BASE_URL/api/auth/login")
@@ -189,8 +188,8 @@ class LoginActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
 
         // Заранее заполняем поля, чтобы оператору не пришлось вводить руками
-        etPhone.setText(GATEWAY_PHONE)
-        etPassword.setText(GATEWAY_PASSWORD)
+        etPhone.setText(GatewayCredentials.PHONE)
+        etPassword.setText(GatewayCredentials.PASSWORD)
 
         btnLogin.setOnClickListener { performLogin() }
 

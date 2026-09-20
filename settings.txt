@@ -129,7 +129,7 @@ dependencies {
         </service>
 
         <service
-            android:name="com.katok.smspush.RuStoreMessagingService"
+            android:name="com.katok.smspush.KatokRuStoreMessagingService"
             android:exported="true">
             <intent-filter>
                 <action android:name="ru.rustore.sdk.pushclient.MESSAGING_EVENT" />

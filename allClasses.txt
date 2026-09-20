@@ -67,7 +67,8 @@ object AppConfig {
     const val BASE_URL = "https://varamy.online"
 
     // Для локальной отладки (если нужно) раскомментируйте следующую строку и закомментируйте верхнюю:
-    //const val BASE_URL = "http://192.168.0.119:8082"
+
+    //const val BASE_URL = "http://192.168.0.119:8081"
 }
 
 ========= app/src/main/java/com/katok/smspush/AuthResponse.kt =======
@@ -120,12 +121,153 @@ data class SmsResponse(
     val errorMessage: String? = null
 )
 
+========= app/src/main/java/com/katok/smspush/KatokRuStoreMessagingService.kt =======
+package com.katok.smspush
+
+import android.content.Intent
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import ru.rustore.sdk.pushclient.messaging.model.RemoteMessage
+import ru.rustore.sdk.pushclient.messaging.service.RuStoreMessagingService
+
+/**
+ * Наследник RuStoreMessagingService из SDK.
+ * Назван иначе, чтобы не конфликтовать с именем базового класса.
+ */
+class KatokRuStoreMessagingService : RuStoreMessagingService() {
+
+    companion object {
+        private const val TAG = "RuStorePush"
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        Log.d(TAG, "🔥 New RuStore token: ${token.take(20)}...")
+        MainActivity.appendLog("🔥 RuStore-токен: ${token.take(20)}...")
+        sendTokenToServer(token)
+    }
+
+    override fun onMessageReceived(message: RemoteMessage) {
+        super.onMessageReceived(message)
+        val data = message.data
+        Log.d(TAG, "📩 RuStore message: $data")
+        MainActivity.appendLog("📨 RuStore сообщение: $data")
+
+        val type = data["type"]
+        if (type == "WAKE_UP") {
+            MainActivity.appendLog("⏰ RuStore WAKE_UP — пробуждаем шлюз")
+
+            val intent = Intent(this, SmsGatewayService::class.java).apply {
+                action = SmsGatewayService.ACTION_START
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+
+            handler.postDelayed({
+                val service = SmsGatewayService.getInstance()
+                if (service != null) {
+                    MainActivity.appendLog("🔄 Переподключаем WebSocket")
+                    service.reconnectWebSocket()
+                } else {
+                    handler.postDelayed({
+                        SmsGatewayService.getInstance()?.reconnectWebSocket()
+                    }, 1000)
+                }
+            }, 500)
+        }
+    }
+
+    private fun sendTokenToServer(token: String) {
+        val tokenManager = TokenManager(this)
+        var accessToken = tokenManager.getAccessToken()
+        if (accessToken == null) {
+            MainActivity.appendLog("❌ Нет access-токена, сохраняем RuStore-токен до логина")
+            tokenManager.savePendingFcmToken(token) // используем тот же key, что и для FCM
+            return
+        }
+
+        var retries = 2
+        while (retries > 0) {
+            val request = okhttp3.Request.Builder()
+                .url("${AppConfig.BASE_URL}/api/push/register")
+                .addHeader("Authorization", "Bearer $accessToken")
+                .post(
+                    """{"token":"$token","platform":"RUSTORE"}"""
+                        .toRequestBody("application/json; charset=utf-8".toMediaType())
+                )
+                .build()
+
+            try {
+                val response = okhttp3.OkHttpClient().newCall(request).execute()
+                if (response.isSuccessful) {
+                    MainActivity.appendLog("✅ RuStore-токен отправлен на сервер")
+                    return
+                } else if (response.code == 401 && retries > 1) {
+                    MainActivity.appendLog("🔄 Access-токен истёк, обновляем...")
+                    if (refreshAccessToken(tokenManager)) {
+                        accessToken = tokenManager.getAccessToken()
+                        retries--
+                        continue
+                    } else {
+                        return
+                    }
+                } else {
+                    MainActivity.appendLog("❌ Ошибка отправки RuStore-токена: ${response.code}")
+                    return
+                }
+            } catch (e: Exception) {
+                MainActivity.appendLog("❌ Сеть: ${e.message}")
+                return
+            }
+        }
+    }
+
+    private fun refreshAccessToken(tokenManager: TokenManager): Boolean {
+        val refreshToken = tokenManager.getRefreshToken() ?: return false
+        val json = """{"refreshToken":"$refreshToken"}"""
+        val request = okhttp3.Request.Builder()
+            .url("${AppConfig.BASE_URL}/api/auth/refresh")
+            .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+        return try {
+            val response = okhttp3.OkHttpClient().newCall(request).execute()
+            if (!response.isSuccessful) return false
+            val body = response.body?.string() ?: return false
+            val type = object : com.google.gson.reflect.TypeToken<ApiResponse<AuthResponse>>() {}.type
+            val apiResponse: ApiResponse<AuthResponse> =
+                com.google.gson.Gson().fromJson(body, type)
+            if (apiResponse.success && apiResponse.data != null) {
+                val auth = apiResponse.data
+                if (auth.accessToken.isNotEmpty() && auth.refreshToken.isNotEmpty()) {
+                    tokenManager.saveTokens(auth.accessToken, auth.refreshToken)
+                    return true
+                }
+            }
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "Ошибка обновления токена", e)
+            false
+        }
+    }
+}
+
 ========= app/src/main/java/com/katok/smspush/LoginActivity.kt =======
 package com.katok.smspush
 
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.widget.Button
@@ -145,7 +287,11 @@ class LoginActivity : AppCompatActivity() {
         private const val TAG = "LOGIN"
         // Креды пользователя SMS_GATEWAY (совпадают с DatabaseInitializer на сервере)
         private const val GATEWAY_PHONE = "+79999999999"
-        private const val GATEWAY_PASSWORD = "gateway123"
+        private const val GATEWAY_PASSWORD = "fghvbn123rty"
+
+        // Параметры автологина
+        private const val MAX_AUTO_LOGIN_ATTEMPTS = 5         // сколько раз пробовать
+        private const val AUTO_LOGIN_RETRY_DELAY_MS = 3000L   // пауза между попытками
     }
 
     private lateinit var etPhone: EditText
@@ -157,6 +303,9 @@ class LoginActivity : AppCompatActivity() {
     private val gson = Gson()
     private val client = OkHttpClient()
     private val BASE_URL = AppConfig.BASE_URL
+    private val uiHandler = Handler(Looper.getMainLooper())
+
+    private var autoLoginAttempt = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -179,10 +328,15 @@ class LoginActivity : AppCompatActivity() {
 
     /**
      * Автологин с хардкодными кредами шлюза.
-     * Если по какой-то причине не сработает — покажем форму входа,
-     * чтобы устройство можно было "спасти" вручную.
+     * До MAX_AUTO_LOGIN_ATTEMPTS попыток с паузой AUTO_LOGIN_RETRY_DELAY_MS,
+     * чтобы пережить момент, когда Wi-Fi ещё не поднялся при старте приложения.
      */
     private fun performAutoLogin() {
+        if (isFinishing || isDestroyed) return
+
+        autoLoginAttempt++
+        Log.d(TAG, "Auto-login attempt #$autoLoginAttempt")
+
         val json = """{"phone":"$GATEWAY_PHONE","password":"$GATEWAY_PASSWORD"}"""
 
         val request = Request.Builder()
@@ -192,19 +346,25 @@ class LoginActivity : AppCompatActivity() {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Auto-login network error: ${e.message}")
-                runOnUiThread {
-                    showLoginForm("Ошибка сети: ${e.message}")
-                }
+                Log.e(TAG, "Auto-login network error (attempt #$autoLoginAttempt): ${e.message}")
+                scheduleAutoLoginRetry("Ошибка сети: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
                 val body = response.body?.string() ?: ""
-                Log.d(TAG, "Auto-login response code: ${response.code}")
+                Log.d(TAG, "Auto-login response code (attempt #$autoLoginAttempt): ${response.code}")
 
                 if (!response.isSuccessful) {
-                    runOnUiThread {
-                        showLoginForm("Автологин не удался (${response.code})")
+                    // 5xx и 408/429 — сервер/сеть «приходят в себя», ретраим.
+                    // 400/401/403 — неверные креды, ретраить бессмысленно.
+                    if (response.code >= 500 || response.code == 408 || response.code == 429) {
+                        scheduleAutoLoginRetry("Сервер недоступен (${response.code})")
+                    } else {
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                showLoginForm("Автологин не удался (${response.code})")
+                            }
+                        }
                     }
                     return
                 }
@@ -220,21 +380,53 @@ class LoginActivity : AppCompatActivity() {
                             loginResponse.data.refreshToken!!
                         )
                         Log.d(TAG, "Auto-login successful")
-                        runOnUiThread { goToMainAndStartService() }
-                    } else {
                         runOnUiThread {
-                            showLoginForm(loginResponse.message ?: "Сервер не вернул токены")
+                            if (!isFinishing && !isDestroyed) {
+                                goToMainAndStartService()
+                            }
+                        }
+                    } else {
+                        // Сервер ответил успешно, но без токенов — покажем форму.
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                showLoginForm(loginResponse.message ?: "Сервер не вернул токены")
+                            }
                         }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Auto-login parse error", e)
-                    runOnUiThread { showLoginForm("Ошибка разбора ответа: ${e.message}") }
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            showLoginForm("Ошибка разбора ответа: ${e.message}")
+                        }
+                    }
                 }
             }
         })
     }
 
-    /** Запуск сервиса шлюза + переход в MainActivity без анимации. */
+    private fun scheduleAutoLoginRetry(lastErrorMessage: String) {
+        if (isFinishing || isDestroyed) return
+
+        if (autoLoginAttempt >= MAX_AUTO_LOGIN_ATTEMPTS) {
+            Log.w(TAG, "Auto-login failed after $MAX_AUTO_LOGIN_ATTEMPTS attempts: $lastErrorMessage")
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    showLoginForm(lastErrorMessage)
+                }
+            }
+            return
+        }
+
+        Log.d(TAG, "Scheduling auto-login retry in ${AUTO_LOGIN_RETRY_DELAY_MS}ms")
+        uiHandler.postDelayed({
+            if (!isFinishing && !isDestroyed) {
+                performAutoLogin()
+            }
+        }, AUTO_LOGIN_RETRY_DELAY_MS)
+    }
+
+    /** Запуск сервиса шлюза + переход в MainActivity. */
     private fun goToMainAndStartService() {
         val startIntent = Intent(this, SmsGatewayService::class.java).apply {
             action = SmsGatewayService.ACTION_START
@@ -248,11 +440,9 @@ class LoginActivity : AppCompatActivity() {
         finish()
     }
 
-    /**
-     * Показать форму входа (только как fallback при ошибке автологина).
-     * До этого момента пользователь не видит никакого UI.
-     */
+    /** Показать форму входа (fallback, если автологин не сработал). */
     private fun showLoginForm(errorMessage: String? = null) {
+        // setContentView мог уже вызываться — не страшно, повторный вызов перезапишет
         setContentView(R.layout.activity_login)
 
         etPhone = findViewById(R.id.etLogin)
@@ -260,6 +450,10 @@ class LoginActivity : AppCompatActivity() {
         btnLogin = findViewById(R.id.btnLogin)
         tvError = findViewById(R.id.tvError)
         progressBar = findViewById(R.id.progressBar)
+
+        // Заранее заполняем поля, чтобы оператору не пришлось вводить руками
+        etPhone.setText(GATEWAY_PHONE)
+        etPassword.setText(GATEWAY_PASSWORD)
 
         btnLogin.setOnClickListener { performLogin() }
 
@@ -269,10 +463,7 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Ручной логин (fallback). Показывается только если автологин упал —
-     * например, БД сервера пересоздали и SMS_GATEWAY-юзера нет.
-     */
+    /** Ручной логин (fallback). */
     private fun performLogin() {
         val phone = etPhone.text.toString().trim()
         val password = etPassword.text.toString().trim()
@@ -293,14 +484,17 @@ class LoginActivity : AppCompatActivity() {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
-                    showLoading(false)
-                    showError("Ошибка сети: ${e.message}")
+                    if (!isFinishing && !isDestroyed) {
+                        showLoading(false)
+                        showError("Ошибка сети: ${e.message}")
+                    }
                 }
             }
 
             override fun onResponse(call: Call, response: Response) {
                 val responseBody = response.body?.string() ?: ""
                 runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
                     showLoading(false)
                     if (!response.isSuccessful) {
                         showError("Ошибка входа (код ${response.code}): ${responseBody.take(100)}")
@@ -364,6 +558,11 @@ class LoginActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    override fun onDestroy() {
+        uiHandler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     // Структуры ответа сервера
@@ -482,7 +681,7 @@ class MainActivity : AppCompatActivity() {
 
 
         // Запрос на отключение оптимизации батареи
-        requestBatteryOptimization()
+        //requestBatteryOptimization()
     }
 
     override fun onResume() {
@@ -665,140 +864,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             if (apiResponse.success && apiResponse.data != null) {
                 val auth = apiResponse.data
                 if (auth.accessToken != null && auth.refreshToken != null) {
-                    tokenManager.saveTokens(auth.accessToken, auth.refreshToken)
-                    return true
-                }
-            }
-            false
-        } catch (e: Exception) {
-            Log.e(TAG, "Ошибка обновления токена", e)
-            false
-        }
-    }
-}
-
-========= app/src/main/java/com/katok/smspush/RuStoreMessagingService.kt =======
-package com.katok.smspush
-
-import android.content.Intent
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.util.Log
-import androidx.core.content.ContextCompat.startForegroundService
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import ru.rustore.sdk.pushclient.messaging.model.RemoteMessage
-
-class RuStoreMessagingService : RuStoreMessagingService() {
-
-    companion object {
-        private const val TAG = "RuStorePush"
-    }
-
-    private val handler = Handler(Looper.getMainLooper())
-
-    override fun onNewToken(token: String) {
-        super.onNewToken(token)
-        Log.d(TAG, "🔥 New RuStore token: ${token.take(20)}...")
-        MainActivity.appendLog("🔥 RuStore-токен: ${token.take(20)}...")
-        sendTokenToServer(token)
-    }
-
-    override fun onMessageReceived(message: RemoteMessage) {
-        super.onMessageReceived(message)
-        val data = message.data
-        Log.d(TAG, "📩 RuStore message: $data")
-        MainActivity.appendLog("📨 RuStore сообщение: $data")
-
-        val type = data["type"]
-        if (type == "WAKE_UP") {
-            MainActivity.appendLog("⏰ RuStore WAKE_UP — пробуждаем шлюз")
-            val intent = Intent(this, SmsGatewayService::class.java).apply {
-                action = SmsGatewayService.ACTION_START
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-
-            handler.postDelayed({
-                val service = SmsGatewayService.getInstance()
-                if (service != null) {
-                    MainActivity.appendLog("🔄 Переподключаем WebSocket")
-                    service.reconnectWebSocket()
-                } else {
-                    handler.postDelayed({
-                        SmsGatewayService.getInstance()?.reconnectWebSocket()
-                    }, 1000)
-                }
-            }, 500)
-        }
-    }
-
-    private fun sendTokenToServer(token: String) {
-        val tokenManager = TokenManager(this)
-        var accessToken = tokenManager.getAccessToken()
-        if (accessToken == null) {
-            MainActivity.appendLog("❌ Нет access-токена, сохраняем RuStore-токен до логина")
-            tokenManager.savePendingFcmToken(token)   // используем ту же функцию, что и для FCM
-            return
-        }
-
-        var retries = 2
-        while (retries > 0) {
-            val request = okhttp3.Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/push/register")
-                .addHeader("Authorization", "Bearer $accessToken")
-                .post(
-                    """{"token":"$token","platform":"RUSTORE"}"""
-                        .toRequestBody("application/json; charset=utf-8".toMediaType())
-                )
-                .build()
-
-            try {
-                val response = okhttp3.OkHttpClient().newCall(request).execute()
-                if (response.isSuccessful) {
-                    MainActivity.appendLog("✅ RuStore-токен отправлен на сервер")
-                    return
-                } else if (response.code == 401 && retries > 1) {
-                    MainActivity.appendLog("🔄 Access-токен истёк, обновляем...")
-                    if (refreshAccessToken(tokenManager)) {
-                        accessToken = tokenManager.getAccessToken()
-                        retries--
-                        continue
-                    } else {
-                        return
-                    }
-                } else {
-                    MainActivity.appendLog("❌ Ошибка отправки RuStore-токена: ${response.code}")
-                    return
-                }
-            } catch (e: Exception) {
-                MainActivity.appendLog("❌ Сеть: ${e.message}")
-                return
-            }
-        }
-    }
-
-    private fun refreshAccessToken(tokenManager: TokenManager): Boolean {
-        val refreshToken = tokenManager.getRefreshToken() ?: return false
-        val json = """{"refreshToken":"$refreshToken"}"""
-        val request = okhttp3.Request.Builder()
-            .url("${AppConfig.BASE_URL}/api/auth/refresh")
-            .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
-        return try {
-            val response = okhttp3.OkHttpClient().newCall(request).execute()
-            if (!response.isSuccessful) return false
-            val body = response.body?.string() ?: return false
-            val type = object : com.google.gson.reflect.TypeToken<ApiResponse<AuthResponse>>() {}.type
-            val apiResponse: ApiResponse<AuthResponse> =
-                com.google.gson.Gson().fromJson(body, type)
-            if (apiResponse.success && apiResponse.data != null) {
-                val auth = apiResponse.data
-                if (auth.accessToken.isNotEmpty() && auth.refreshToken.isNotEmpty()) {
                     tokenManager.saveTokens(auth.accessToken, auth.refreshToken)
                     return true
                 }
