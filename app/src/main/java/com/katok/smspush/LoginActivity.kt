@@ -10,6 +10,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
+import android.widget.RadioButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.google.gson.Gson
@@ -33,6 +34,11 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var btnLogin: Button
     private lateinit var tvError: TextView
     private lateinit var progressBar: ProgressBar
+    private lateinit var rbGlobal: RadioButton
+    private lateinit var rbLocal: RadioButton
+
+    // Флаг, что форма уже построена (чтобы не пересоздавать её)
+    private var loginFormShown = false
 
     private val gson = Gson()
     private val client = OkHttpClient()
@@ -56,16 +62,17 @@ class LoginActivity : AppCompatActivity() {
             return
         }
 
-        // 2. Если refresh есть — сначала пробуем обновить через него
+        // 2. Показываем форму сразу, чтобы можно было выбрать сервер
+        showLoginForm(null)
+
+        // 3. Запускаем автологин в фоне
         if (!refreshToken.isNullOrEmpty()) {
             Log.d(TAG, "Access expired, trying refresh first")
             tryRefreshThenLogin(tokenManager, refreshToken)
-            return
+        } else {
+            Log.d(TAG, "No refresh token, performing auto-login")
+            performAutoLogin()
         }
-
-        // 3. Refresh-токена нет — сразу автологин
-        Log.d(TAG, "No refresh token, performing auto-login")
-        performAutoLogin()
     }
 
     /**
@@ -250,25 +257,80 @@ class LoginActivity : AppCompatActivity() {
     }
 
     /** Показать форму входа (fallback, если автологин не сработал). */
+    /** Показать форму входа. Идемпотентна: если уже показана — только обновляет ошибку. */
     private fun showLoginForm(errorMessage: String? = null) {
-        // setContentView мог уже вызываться — не страшно, повторный вызов перезапишет
-        setContentView(R.layout.activity_login)
+        if (!loginFormShown) {
+            setContentView(R.layout.activity_login)
+            loginFormShown = true
 
-        etPhone = findViewById(R.id.etLogin)
-        etPassword = findViewById(R.id.etPassword)
-        btnLogin = findViewById(R.id.btnLogin)
-        tvError = findViewById(R.id.tvError)
-        progressBar = findViewById(R.id.progressBar)
+            etPhone = findViewById(R.id.etLogin)
+            etPassword = findViewById(R.id.etPassword)
+            btnLogin = findViewById(R.id.btnLogin)
+            tvError = findViewById(R.id.tvError)
+            progressBar = findViewById(R.id.progressBar)
+            rbGlobal = findViewById(R.id.loginRbGlobal)
+            rbLocal = findViewById(R.id.loginRbLocal)
 
-        // Заранее заполняем поля, чтобы оператору не пришлось вводить руками
-        etPhone.setText(GatewayCredentials.PHONE)
-        etPassword.setText(GatewayCredentials.PASSWORD)
+            // Заранее заполняем поля, чтобы оператору не пришлось вводить руками
+            etPhone.setText(GatewayCredentials.PHONE)
+            etPassword.setText(GatewayCredentials.PASSWORD)
 
-        btnLogin.setOnClickListener { performLogin() }
+            btnLogin.setOnClickListener { performLogin() }
+
+            setupServerSwitcher()
+        }
 
         if (!errorMessage.isNullOrEmpty()) {
             tvError.text = errorMessage
             tvError.visibility = View.VISIBLE
+        } else {
+            tvError.visibility = View.GONE
+        }
+    }
+
+    /** Инициализация переключателя сервера на экране логина. */
+    private fun setupServerSwitcher() {
+        val currentUrl = AppConfig.getBaseUrl(this)
+        if (currentUrl == AppConfig.LOCAL_URL) {
+            rbLocal.isChecked = true
+        } else {
+            rbGlobal.isChecked = true
+        }
+
+        rbGlobal.setOnClickListener {
+            if (AppConfig.getBaseUrl(this) != AppConfig.GLOBAL_URL) {
+                AppConfig.setBaseUrl(this, AppConfig.GLOBAL_URL)
+                Log.d(TAG, "Server switched to ${AppConfig.GLOBAL_URL}")
+                restartAutoLogin()
+            }
+        }
+
+        rbLocal.setOnClickListener {
+            if (AppConfig.getBaseUrl(this) != AppConfig.LOCAL_URL) {
+                AppConfig.setBaseUrl(this, AppConfig.LOCAL_URL)
+                Log.d(TAG, "Server switched to ${AppConfig.LOCAL_URL}")
+                restartAutoLogin()
+            }
+        }
+    }
+
+    /**
+     * Пользователь переключил сервер — сбрасываем счётчик попыток
+     * и заново пробуем автологин уже по новому адресу.
+     */
+    private fun restartAutoLogin() {
+        uiHandler.removeCallbacksAndMessages(null)
+        autoLoginAttempt = 0
+        tvError.visibility = View.GONE
+
+        val tokenManager = TokenManager(this)
+        val refreshToken = tokenManager.getRefreshToken()
+        if (!refreshToken.isNullOrEmpty()) {
+            Log.d(TAG, "Restarting auto-login via refresh")
+            tryRefreshThenLogin(tokenManager, refreshToken)
+        } else {
+            Log.d(TAG, "Restarting auto-login with credentials")
+            performAutoLogin()
         }
     }
 
