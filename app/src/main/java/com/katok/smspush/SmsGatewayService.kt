@@ -28,10 +28,6 @@ class SmsGatewayService : Service() {
         const val ACTION_STOP = "stop"
         const val CHANNEL_ID = "sms_gateway_channel"
         const val NOTIFICATION_ID = 1
-        val WS_URL = AppConfig.BASE_URL.replace("http", "ws") + "/ws"
-        val REFRESH_URL = AppConfig.BASE_URL + "/api/auth/refresh"
-        // Увеличиваем интервал обновления до 23 часов (при 7-дневном access-токене)
-        val LOGIN_URL = AppConfig.BASE_URL + "/api/auth/login"
         const val TOKEN_REFRESH_INTERVAL = 23 * 60 * 60 * 1000L
 
         private var instance: SmsGatewayService? = null
@@ -180,7 +176,7 @@ class SmsGatewayService : Service() {
         reconnectAttempts = 0
         MainActivity.appendLog("🌐 Подключение к WebSocket...")
         WebSocketManager.getInstance().connect(
-            url = WS_URL,
+            url = AppConfig.getWsUrl(this),
             token = accessToken,
             listener = object : WebSocketManager.Listener {
                 override fun onMessage(payload: String) {
@@ -326,7 +322,7 @@ class SmsGatewayService : Service() {
         return try {
             val json = """{"phone":"${GatewayCredentials.PHONE}","password":"${GatewayCredentials.PASSWORD}"}"""
             val request = okhttp3.Request.Builder()
-                .url(LOGIN_URL)
+                .url(AppConfig.getLoginUrl(this))
                 .post(okhttp3.RequestBody.create("application/json; charset=utf-8".toMediaType(), json))
                 .build()
 
@@ -359,7 +355,7 @@ class SmsGatewayService : Service() {
         val refreshToken = tokenManager.getRefreshToken() ?: return false
         val jsonBody = """{"refreshToken":"$refreshToken"}"""
         val request = okhttp3.Request.Builder()
-            .url(REFRESH_URL)
+            .url(AppConfig.getRefreshUrl(this))
             .post(okhttp3.RequestBody.create("application/json; charset=utf-8".toMediaType(), jsonBody))
             .build()
         return try {

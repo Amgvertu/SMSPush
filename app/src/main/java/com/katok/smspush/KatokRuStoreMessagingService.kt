@@ -75,7 +75,7 @@ class KatokRuStoreMessagingService : RuStoreMessagingService() {
         var retries = 2
         while (retries > 0) {
             val request = okhttp3.Request.Builder()
-                .url("${AppConfig.BASE_URL}/api/push/register")
+                .url("${AppConfig.getBaseUrl(this@KatokRuStoreMessagingService)}/api/push/register")
                 .addHeader("Authorization", "Bearer $accessToken")
                 .post(
                     """{"token":"$token","platform":"RUSTORE"}"""
@@ -112,7 +112,7 @@ class KatokRuStoreMessagingService : RuStoreMessagingService() {
         val refreshToken = tokenManager.getRefreshToken() ?: return false
         val json = """{"refreshToken":"$refreshToken"}"""
         val request = okhttp3.Request.Builder()
-            .url("${AppConfig.BASE_URL}/api/auth/refresh")
+            .url("${AppConfig.getBaseUrl(this@KatokRuStoreMessagingService)}/api/auth/refresh")
             .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
         return try {

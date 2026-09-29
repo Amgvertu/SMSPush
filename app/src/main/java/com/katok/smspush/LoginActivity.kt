@@ -36,7 +36,6 @@ class LoginActivity : AppCompatActivity() {
 
     private val gson = Gson()
     private val client = OkHttpClient()
-    private val BASE_URL = AppConfig.BASE_URL
     private val uiHandler = Handler(Looper.getMainLooper())
 
     private var autoLoginAttempt = 0
@@ -70,7 +69,7 @@ class LoginActivity : AppCompatActivity() {
     private fun tryRefreshThenLogin(tokenManager: TokenManager, refreshToken: String) {
         val json = """{"refreshToken":"$refreshToken"}"""
         val request = Request.Builder()
-            .url("$BASE_URL/api/auth/refresh")
+            .url("${AppConfig.getBaseUrl(this)}/api/auth/refresh")
             .post(RequestBody.create("application/json; charset=utf-8".toMediaType(), json))
             .build()
 
@@ -142,7 +141,7 @@ class LoginActivity : AppCompatActivity() {
         val json = """{"phone":"${GatewayCredentials.PHONE}","password":"${GatewayCredentials.PASSWORD}"}"""
 
         val request = Request.Builder()
-            .url("$BASE_URL/api/auth/login")
+            .url("${AppConfig.getBaseUrl(this)}/api/auth/login")
             .post(RequestBody.create("application/json".toMediaType(), json))
             .build()
 
@@ -280,7 +279,7 @@ class LoginActivity : AppCompatActivity() {
 
         val json = """{"phone":"$phone","password":"$password"}"""
         val request = Request.Builder()
-            .url("$BASE_URL/api/auth/login")
+            .url("${AppConfig.getBaseUrl(this)}/api/auth/login")
             .post(RequestBody.create("application/json".toMediaType(), json))
             .build()
 
@@ -345,7 +344,7 @@ class LoginActivity : AppCompatActivity() {
         val accessToken = tokenManager.getAccessToken() ?: return
         val json = """{"token":"$token","platform":"$platform"}"""
         val request = Request.Builder()
-            .url("$BASE_URL/api/push/register")
+            .url("${AppConfig.getBaseUrl(this)}/api/push/register")
             .addHeader("Authorization", "Bearer $accessToken")
             .post(RequestBody.create("application/json; charset=utf-8".toMediaType(), json))
             .build()

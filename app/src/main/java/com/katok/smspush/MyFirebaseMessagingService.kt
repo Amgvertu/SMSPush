@@ -19,8 +19,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     companion object {
         private const val TAG = "FCM"
-        // Используем тот же адрес сервера, что и в AppConfig
-        private val BASE_URL = AppConfig.BASE_URL
         // Один OkHttpClient на весь сервис (переиспользует пул соединений)
         private val httpClient = OkHttpClient()
     }
@@ -80,7 +78,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         var retries = 2
         while (retries > 0) {
             val request = Request.Builder()
-                .url("$BASE_URL/api/push/register")
+                .url("${AppConfig.getBaseUrl(this@MyFirebaseMessagingService)}/api/push/register")
                 .addHeader("Authorization", "Bearer $accessToken")
                 .post(
                     """{"token":"$token","platform":"FCM"}""".toRequestBody(
@@ -120,7 +118,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val refreshToken = tokenManager.getRefreshToken() ?: return false
         val json = """{"refreshToken":"$refreshToken"}"""
         val request = Request.Builder()
-            .url("$BASE_URL/api/auth/refresh")
+            .url("${AppConfig.getBaseUrl(this@MyFirebaseMessagingService)}/api/auth/refresh")
             .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
         return try {

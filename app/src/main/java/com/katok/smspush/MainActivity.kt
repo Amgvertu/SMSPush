@@ -11,6 +11,7 @@ import android.provider.Settings
 import android.net.Uri
 import android.view.View
 import android.widget.Button
+import android.widget.RadioButton
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
@@ -31,7 +32,7 @@ class MainActivity : AppCompatActivity() {
         private var activityRef: MainActivity? = null
 
         fun appendLog(message: String) {
-            val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val timestamp = SimpleDateFormat("dd.MM HH:mm:ss", Locale.getDefault()).format(Date())
             val line = "$timestamp $message"
             synchronized(logBuffer) {
                 logBuffer.addLast(line)
@@ -84,6 +85,33 @@ class MainActivity : AppCompatActivity() {
 
         tvLogs = findViewById(R.id.tvLogs)
         scrollView = findViewById(R.id.scrollView)
+
+        // --- Переключатель сервера ---
+        val rbGlobal = findViewById<RadioButton>(R.id.rbGlobal)
+        val rbLocal = findViewById<RadioButton>(R.id.rbLocal)
+
+        val currentUrl = AppConfig.getBaseUrl(this)
+        if (currentUrl == AppConfig.LOCAL_URL) {
+            rbLocal.isChecked = true
+        } else {
+            rbGlobal.isChecked = true
+        }
+
+        rbGlobal.setOnClickListener {
+            if (AppConfig.getBaseUrl(this) != AppConfig.GLOBAL_URL) {
+                AppConfig.setBaseUrl(this, AppConfig.GLOBAL_URL)
+                appendLog("🌐 Сервер: ${AppConfig.GLOBAL_URL}")
+                restartGatewayConnection()
+            }
+        }
+
+        rbLocal.setOnClickListener {
+            if (AppConfig.getBaseUrl(this) != AppConfig.LOCAL_URL) {
+                AppConfig.setBaseUrl(this, AppConfig.LOCAL_URL)
+                appendLog("🌐 Сервер: ${AppConfig.LOCAL_URL}")
+                restartGatewayConnection()
+            }
+        }
 
         val btnStart = findViewById<Button>(R.id.btnStart)
         val btnStop = findViewById<Button>(R.id.btnStop)
@@ -140,6 +168,20 @@ class MainActivity : AppCompatActivity() {
         // Прокрутка вниз
         scrollView.post {
             scrollView.fullScroll(View.FOCUS_DOWN)
+        }
+    }
+
+    /**
+     * Перезапуск WebSocket-соединения с новым адресом.
+     * Если сервис не запущен — переключение применится при следующем старте.
+     */
+    private fun restartGatewayConnection() {
+        val service = SmsGatewayService.getInstance()
+        if (service != null) {
+            appendLog("🔄 Переподключаемся к новому серверу...")
+            service.reconnectWebSocket()
+        } else {
+            appendLog("⚠️ Сервис не запущен, адрес применится при следующем старте")
         }
     }
 
