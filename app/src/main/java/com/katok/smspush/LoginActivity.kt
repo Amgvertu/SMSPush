@@ -47,7 +47,7 @@ class LoginActivity : AppCompatActivity() {
         val accessToken = tokenManager.getAccessToken()
         val refreshToken = tokenManager.getRefreshToken()
 
-// 1. Токены уже есть и access ещё живой — тихо уходим в MainActivity
+        // 1. Токены уже есть и access ещё живой — тихо уходим в MainActivity
         if (!accessToken.isNullOrEmpty()
             && !refreshToken.isNullOrEmpty()
             && !tokenManager.isTokenExpired(accessToken)) {
@@ -56,8 +56,15 @@ class LoginActivity : AppCompatActivity() {
             return
         }
 
-// 2. Токенов нет или access просрочен — пробуем автологин
-        Log.d(TAG, "No tokens or access expired, performing auto-login")
+        // 2. Если refresh есть — сначала пробуем обновить через него
+        if (!refreshToken.isNullOrEmpty()) {
+            Log.d(TAG, "Access expired, trying refresh first")
+            tryRefreshThenLogin(tokenManager, refreshToken)
+            return
+        }
+
+        // 3. Refresh-токена нет — сразу автологин
+        Log.d(TAG, "No refresh token, performing auto-login")
         performAutoLogin()
     }
 
