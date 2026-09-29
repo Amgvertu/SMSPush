@@ -51,11 +51,18 @@ class KatokRuStoreMessagingService : RuStoreMessagingService() {
             handler.postDelayed({
                 val service = SmsGatewayService.getInstance()
                 if (service != null) {
-                    MainActivity.appendLog("🔄 Переподключаем WebSocket")
-                    service.reconnectWebSocket()
+                    if (!WebSocketManager.getInstance().isConnected()) {
+                        MainActivity.appendLog("🔄 Переподключаем WebSocket (был разорван)")
+                        service.reconnectWebSocket()
+                    } else {
+                        MainActivity.appendLog("✅ WebSocket уже подключён, WAKE_UP не нужен")
+                    }
                 } else {
                     handler.postDelayed({
-                        SmsGatewayService.getInstance()?.reconnectWebSocket()
+                        val s = SmsGatewayService.getInstance()
+                        if (s != null && !WebSocketManager.getInstance().isConnected()) {
+                            s.reconnectWebSocket()
+                        }
                     }, 1000)
                 }
             }, 500)

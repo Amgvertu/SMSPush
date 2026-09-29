@@ -63,6 +63,74 @@ class LoginActivity : AppCompatActivity() {
     }
 
     /**
+     * Пробует обновить access-токен через refresh.
+     * При успехе — сохраняем, отправляем pending-токен, идём в MainActivity.
+     * При неудаче — падаем в полный автологин по паролю.
+     */
+    private fun tryRefreshThenLogin(tokenManager: TokenManager, refreshToken: String) {
+        val json = """{"refreshToken":"$refreshToken"}"""
+        val request = Request.Builder()
+            .url("$BASE_URL/api/auth/refresh")
+            .post(RequestBody.create("application/json; charset=utf-8".toMediaType(), json))
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "Refresh network error: ${e.message}")
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) performAutoLogin()
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val body = response.body?.string() ?: ""
+                Log.d(TAG, "Refresh response code: ${response.code}")
+
+                if (response.isSuccessful) {
+                    try {
+                        val loginResponse = gson.fromJson(body, LoginResponse::class.java)
+                        if (loginResponse.success
+                            && loginResponse.data?.accessToken != null
+                            && loginResponse.data?.refreshToken != null
+                        ) {
+                            TokenManager(this@LoginActivity).saveTokens(
+                                loginResponse.data.accessToken!!,
+                                loginResponse.data.refreshToken!!
+                            )
+                            Log.d(TAG, "Refresh successful")
+                            runOnUiThread {
+                                if (!isFinishing && !isDestroyed) {
+                                    sendPendingFcmIfAny()
+                                    goToMainAndStartService()
+                                }
+                            }
+                            return
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Refresh parse error", e)
+                    }
+                }
+
+                // Refresh не сработал — падаем в полный логин
+                Log.d(TAG, "Refresh failed, falling back to full login")
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) performAutoLogin()
+                }
+            }
+        })
+    }
+
+    /**
+     * Отправляет pending push-токен (FCM/RuStore), накопившийся до логина.
+     */
+    private fun sendPendingFcmIfAny() {
+        val pendingFcm = TokenManager(this).getPendingFcmToken()
+        if (pendingFcm != null) {
+            sendPendingFcmToken(pendingFcm)
+        }
+    }
+
+    /**
      * Автологин с хардкодными кредами шлюза.
      * До MAX_AUTO_LOGIN_ATTEMPTS попыток с паузой AUTO_LOGIN_RETRY_DELAY_MS,
      * чтобы пережить момент, когда Wi-Fi ещё не поднялся при старте приложения.
@@ -118,6 +186,7 @@ class LoginActivity : AppCompatActivity() {
                         Log.d(TAG, "Auto-login successful")
                         runOnUiThread {
                             if (!isFinishing && !isDestroyed) {
+                                sendPendingFcmIfAny()
                                 goToMainAndStartService()
                             }
                         }

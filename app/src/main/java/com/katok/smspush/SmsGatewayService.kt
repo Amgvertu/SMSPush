@@ -43,6 +43,7 @@ class SmsGatewayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var reconnectRunnable: Runnable? = null
     private var tokenRefreshRunnable: Runnable? = null
+    @Volatile
     private var isRefreshingToken = false
     private var reconnectAttempts = 0
     private val MAX_RECONNECT_ATTEMPTS = 5
@@ -81,8 +82,14 @@ class SmsGatewayService : Service() {
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
         healthCheckRunnable = Runnable {
-            checkHealth()
-            handler.postDelayed(healthCheckRunnable, 30000)
+            try {
+                checkHealth()
+            } catch (e: Exception) {
+                MainActivity.appendLog("❌ health check ошибка: ${e.message}")
+                Log.e(TAG, "health check error", e)
+            } finally {
+                handler.postDelayed(healthCheckRunnable, 30000)
+            }
         }
         acquireWakeLock()
         MainActivity.appendLog("Сервис создан")
@@ -102,23 +109,28 @@ class SmsGatewayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        // Если система перезапустила сервис (intent == null) — ведём себя как при ACTION_START
+        val action = intent?.action ?: ACTION_START
+
+        when (action) {
             ACTION_START -> {
                 try {
                     startForeground(NOTIFICATION_ID, buildNotification("Шлюз запущен"))
                 } catch (e: Exception) {
                     MainActivity.appendLog("❌ Ошибка startForeground: ${e.message}")
                     e.printStackTrace()
+                    stopSelf()
+                    return START_NOT_STICKY
                 }
                 MainActivity.appendLog("Сервис запущен")
                 requestBatteryOptimizationExemption()
                 connectWebSocket()
                 scheduleTokenRefresh()
-                startHealthCheck()   // ✅ Запускаем health check
+                startHealthCheck()
             }
             ACTION_STOP -> {
                 MainActivity.appendLog("Сервис останавливается")
-                stopHealthCheck()    // ✅ Останавливаем health check
+                stopHealthCheck()
                 WebSocketManager.getInstance().disconnect()
                 cancelAllTimers()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -135,6 +147,7 @@ class SmsGatewayService : Service() {
 
     // ---------- Health Check ----------
     private fun startHealthCheck() {
+        handler.removeCallbacks(healthCheckRunnable)
         handler.post(healthCheckRunnable)
     }
 
@@ -335,7 +348,8 @@ class SmsGatewayService : Service() {
             if (!response.isSuccessful) return false
             val body = response.body?.string() ?: return false
             // Парсим обёртку ApiResponse<AuthResponse>
-            val apiResponse = gson.fromJson(body, ApiResponse::class.java) as ApiResponse<AuthResponse>
+            val type = object : com.google.gson.reflect.TypeToken<ApiResponse<AuthResponse>>() {}.type
+            val apiResponse: ApiResponse<AuthResponse> = gson.fromJson(body, type)
             if (apiResponse.success && apiResponse.data != null) {
                 val auth = apiResponse.data
                 if (auth.accessToken != null && auth.refreshToken != null) {
@@ -358,6 +372,7 @@ class SmsGatewayService : Service() {
 
     // ---------- Планировщики ----------
     private fun scheduleTokenRefresh() {
+        tokenRefreshRunnable?.let { handler.removeCallbacks(it) }
         tokenRefreshRunnable = Runnable {
             MainActivity.appendLog("⏰ Запланированное обновление токена")
             tryRefreshAndReconnect()
@@ -424,9 +439,14 @@ class SmsGatewayService : Service() {
 
     override fun onDestroy() {
         instance = null
+        cancelAllTimers()
         wakeLock?.let { if (it.isHeld) it.release() }
+        try {
+            unregisterReceiver(tokenUpdateReceiver)
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "tokenUpdateReceiver не был зарегистрирован")
+        }
         MainActivity.appendLog("Сервис уничтожен")
-        unregisterReceiver(tokenUpdateReceiver)   // <-- добавить
         super.onDestroy()
     }
 

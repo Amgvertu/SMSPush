@@ -26,15 +26,34 @@ class MainActivity : AppCompatActivity() {
     private val logHandler = Handler(Looper.getMainLooper())
 
     companion object {
-        private var logText = ""
+        private const val MAX_LOG_LINES = 500
+        private val logBuffer = ArrayDeque<String>()
         private var activityRef: MainActivity? = null
 
         fun appendLog(message: String) {
             val timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            logText = "$logText\n$timestamp $message"
+            val line = "$timestamp $message"
+            synchronized(logBuffer) {
+                logBuffer.addLast(line)
+                while (logBuffer.size > MAX_LOG_LINES) {
+                    logBuffer.removeFirst()
+                }
+            }
             // Обновляем UI из любого потока
             activityRef?.runOnUiThread {
                 activityRef?.updateLogs()
+            }
+        }
+
+        private fun getLogText(): String {
+            synchronized(logBuffer) {
+                return logBuffer.joinToString("\n")
+            }
+        }
+
+        private fun clearLogs() {
+            synchronized(logBuffer) {
+                logBuffer.clear()
             }
         }
     }
@@ -54,6 +73,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val intent = Intent("UPDATE_TOKENS")
+            .setPackage(packageName)
         intent.putExtra("access_token", tokenManager.getAccessToken())
         intent.putExtra("refresh_token", tokenManager.getRefreshToken())
         sendBroadcast(intent)
@@ -90,7 +110,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnClear.setOnClickListener {
-            logText = ""
+            clearLogs()
             tvLogs.text = "Логи очищены"
         }
 
@@ -116,7 +136,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateLogs() {
-        tvLogs.text = logText
+        tvLogs.text = getLogText()
         // Прокрутка вниз
         scrollView.post {
             scrollView.fullScroll(View.FOCUS_DOWN)

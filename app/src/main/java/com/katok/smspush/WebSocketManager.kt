@@ -70,8 +70,8 @@ class WebSocketManager private constructor() {
 
         stompClient = Stomp.over(Stomp.ConnectionProvider.OKHTTP, url)
 
-        stompClient?.withClientHeartbeat(10000)
-        stompClient?.withServerHeartbeat(10000)
+        stompClient?.withClientHeartbeat(5000)
+        stompClient?.withServerHeartbeat(5000)
 
         val connectHeaders = listOf(
             StompHeader("Authorization", "Bearer $token"),

@@ -55,13 +55,19 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             handler.postDelayed({
                 val service = SmsGatewayService.getInstance()
                 if (service != null) {
-                    MainActivity.appendLog("🔄 Переподключаем WebSocket")
-                    service.reconnectWebSocket()
+                    if (!WebSocketManager.getInstance().isConnected()) {
+                        MainActivity.appendLog("🔄 Переподключаем WebSocket (был разорван)")
+                        service.reconnectWebSocket()
+                    } else {
+                        MainActivity.appendLog("✅ WebSocket уже подключён, WAKE_UP не нужен")
+                    }
                 } else {
-                    // Если сервис ещё не создан – пробуем через 1 секунду
                     MainActivity.appendLog("⚠️ Сервис ещё не готов, повтор через 1с")
                     handler.postDelayed({
-                        SmsGatewayService.getInstance()?.reconnectWebSocket()
+                        val s = SmsGatewayService.getInstance()
+                        if (s != null && !WebSocketManager.getInstance().isConnected()) {
+                            s.reconnectWebSocket()
+                        }
                     }, 1000)
                 }
             }, 500)
