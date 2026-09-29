@@ -124,10 +124,8 @@ class LoginActivity : AppCompatActivity() {
      * Отправляет pending push-токен (FCM/RuStore), накопившийся до логина.
      */
     private fun sendPendingFcmIfAny() {
-        val pendingFcm = TokenManager(this).getPendingFcmToken()
-        if (pendingFcm != null) {
-            sendPendingFcmToken(pendingFcm)
-        }
+        sendPendingToken("FCM")
+        sendPendingToken("RUSTORE")
     }
 
     /**
@@ -316,11 +314,8 @@ class LoginActivity : AppCompatActivity() {
                                 loginResponse.data.refreshToken!!
                             )
 
-                            // Отправить pending FCM-токен, если копился до логина
-                            val pendingFcm = TokenManager(this@LoginActivity).getPendingFcmToken()
-                            if (pendingFcm != null) {
-                                sendPendingFcmToken(pendingFcm)
-                            }
+                            // Отправить pending push-токены, если копились до логина
+                            sendPendingFcmIfAny()
 
                             goToMainAndStartService()
                         } else {
@@ -344,9 +339,11 @@ class LoginActivity : AppCompatActivity() {
         tvError.visibility = View.VISIBLE
     }
 
-    private fun sendPendingFcmToken(fcmToken: String) {
-        val accessToken = TokenManager(this).getAccessToken() ?: return
-        val json = """{"token":"$fcmToken","platform":"FCM"}"""
+    private fun sendPendingToken(platform: String) {
+        val tokenManager = TokenManager(this)
+        val token = tokenManager.getPendingToken(platform) ?: return
+        val accessToken = tokenManager.getAccessToken() ?: return
+        val json = """{"token":"$token","platform":"$platform"}"""
         val request = Request.Builder()
             .url("$BASE_URL/api/push/register")
             .addHeader("Authorization", "Bearer $accessToken")
@@ -354,12 +351,12 @@ class LoginActivity : AppCompatActivity() {
             .build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                Log.e(TAG, "Не удалось отправить pending FCM: ${e.message}")
+                Log.e(TAG, "Не удалось отправить pending $platform-токен: ${e.message}")
             }
             override fun onResponse(call: Call, response: Response) {
                 if (response.isSuccessful) {
-                    TokenManager(this@LoginActivity).clearPendingFcmToken()
-                    Log.d(TAG, "Pending FCM-токен отправлен")
+                    tokenManager.clearPendingToken(platform)
+                    Log.d(TAG, "Pending $platform-токен отправлен")
                 }
             }
         })

@@ -21,6 +21,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         private const val TAG = "FCM"
         // Используем тот же адрес сервера, что и в AppConfig
         private val BASE_URL = AppConfig.BASE_URL
+        // Один OkHttpClient на весь сервис (переиспользует пул соединений)
+        private val httpClient = OkHttpClient()
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -55,19 +57,11 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             handler.postDelayed({
                 val service = SmsGatewayService.getInstance()
                 if (service != null) {
-                    if (!WebSocketManager.getInstance().isConnected()) {
-                        MainActivity.appendLog("🔄 Переподключаем WebSocket (был разорван)")
-                        service.reconnectWebSocket()
-                    } else {
-                        MainActivity.appendLog("✅ WebSocket уже подключён, WAKE_UP не нужен")
-                    }
+                    service.scheduleWakeUpReconnect()
                 } else {
                     MainActivity.appendLog("⚠️ Сервис ещё не готов, повтор через 1с")
                     handler.postDelayed({
-                        val s = SmsGatewayService.getInstance()
-                        if (s != null && !WebSocketManager.getInstance().isConnected()) {
-                            s.reconnectWebSocket()
-                        }
+                        SmsGatewayService.getInstance()?.scheduleWakeUpReconnect()
                     }, 1000)
                 }
             }, 500)
@@ -79,7 +73,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         var accessToken = tokenManager.getAccessToken()
         if (accessToken == null) {
             MainActivity.appendLog("❌ Нет access-токена, сохраняем FCM-токен до логина")
-            tokenManager.savePendingFcmToken(token)
+            tokenManager.savePendingToken("FCM", token)
             return
         }
 
@@ -96,7 +90,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 .build()
 
             try {
-                val response = OkHttpClient().newCall(request).execute()
+                val response = httpClient.newCall(request).execute()
                 if (response.isSuccessful) {
                     MainActivity.appendLog("✅ FCM-токен успешно отправлен на сервер")
                     return
@@ -130,7 +124,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
         return try {
-            val response = OkHttpClient().newCall(request).execute()
+            val response = httpClient.newCall(request).execute()
             if (!response.isSuccessful) return false
             val body = response.body?.string() ?: return false
             val type = object : TypeToken<ApiResponse<AuthResponse>>() {}.type

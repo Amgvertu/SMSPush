@@ -18,6 +18,8 @@ class KatokRuStoreMessagingService : RuStoreMessagingService() {
 
     companion object {
         private const val TAG = "RuStorePush"
+        // Один OkHttpClient на весь сервис
+        private val httpClient = okhttp3.OkHttpClient()
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -51,18 +53,10 @@ class KatokRuStoreMessagingService : RuStoreMessagingService() {
             handler.postDelayed({
                 val service = SmsGatewayService.getInstance()
                 if (service != null) {
-                    if (!WebSocketManager.getInstance().isConnected()) {
-                        MainActivity.appendLog("🔄 Переподключаем WebSocket (был разорван)")
-                        service.reconnectWebSocket()
-                    } else {
-                        MainActivity.appendLog("✅ WebSocket уже подключён, WAKE_UP не нужен")
-                    }
+                    service.scheduleWakeUpReconnect()
                 } else {
                     handler.postDelayed({
-                        val s = SmsGatewayService.getInstance()
-                        if (s != null && !WebSocketManager.getInstance().isConnected()) {
-                            s.reconnectWebSocket()
-                        }
+                        SmsGatewayService.getInstance()?.scheduleWakeUpReconnect()
                     }, 1000)
                 }
             }, 500)
@@ -74,7 +68,7 @@ class KatokRuStoreMessagingService : RuStoreMessagingService() {
         var accessToken = tokenManager.getAccessToken()
         if (accessToken == null) {
             MainActivity.appendLog("❌ Нет access-токена, сохраняем RuStore-токен до логина")
-            tokenManager.savePendingFcmToken(token) // используем тот же key, что и для FCM
+            tokenManager.savePendingToken("RUSTORE", token)
             return
         }
 
@@ -90,7 +84,7 @@ class KatokRuStoreMessagingService : RuStoreMessagingService() {
                 .build()
 
             try {
-                val response = okhttp3.OkHttpClient().newCall(request).execute()
+                val response = httpClient.newCall(request).execute()
                 if (response.isSuccessful) {
                     MainActivity.appendLog("✅ RuStore-токен отправлен на сервер")
                     return
@@ -122,7 +116,7 @@ class KatokRuStoreMessagingService : RuStoreMessagingService() {
             .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
         return try {
-            val response = okhttp3.OkHttpClient().newCall(request).execute()
+            val response = httpClient.newCall(request).execute()
             if (!response.isSuccessful) return false
             val body = response.body?.string() ?: return false
             val type = object : com.google.gson.reflect.TypeToken<ApiResponse<AuthResponse>>() {}.type

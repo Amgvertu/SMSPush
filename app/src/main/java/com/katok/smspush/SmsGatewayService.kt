@@ -43,8 +43,8 @@ class SmsGatewayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var reconnectRunnable: Runnable? = null
     private var tokenRefreshRunnable: Runnable? = null
-    @Volatile
-    private var isRefreshingToken = false
+    private var wakeUpReconnectRunnable: Runnable? = null
+    private val isRefreshingToken = java.util.concurrent.atomic.AtomicBoolean(false)
     private var reconnectAttempts = 0
     private val MAX_RECONNECT_ATTEMPTS = 5
 
@@ -156,7 +156,7 @@ class SmsGatewayService : Service() {
     }
 
     private fun checkHealth() {
-        if (!WebSocketManager.getInstance().isConnected() && !isRefreshingToken) {
+        if (!WebSocketManager.getInstance().isConnected() && !isRefreshingToken.get()) {
             MainActivity.appendLog("🩺 Обнаружено разорванное соединение, переподключаемся")
             tryRefreshAndReconnect()
         }
@@ -207,6 +207,24 @@ class SmsGatewayService : Service() {
         connectWebSocket()
     }
 
+    /**
+     * Планирует переподключение после WAKE_UP.
+     * Если WAKE_UP прилетел несколько раз подряд — выполнится только один reconnect.
+     */
+    fun scheduleWakeUpReconnect() {
+        wakeUpReconnectRunnable?.let { handler.removeCallbacks(it) }
+        MainActivity.appendLog("⏰ WAKE_UP: планируем переподключение через 500мс")
+        wakeUpReconnectRunnable = Runnable {
+            if (!WebSocketManager.getInstance().isConnected()) {
+                MainActivity.appendLog("🔄 Переподключаем WebSocket после WAKE_UP")
+                reconnectWebSocket()
+            } else {
+                MainActivity.appendLog("✅ WebSocket уже подключён, WAKE_UP не нужен")
+            }
+        }
+        handler.postDelayed(wakeUpReconnectRunnable!!, 500)
+    }
+
     // ---------- Обработка сообщений ----------
     private fun handleStompMessage(raw: String) {
         MainActivity.appendLog("📩 Получено сообщение от сервера: $raw")
@@ -249,7 +267,8 @@ class SmsGatewayService : Service() {
 
     // ---------- Обновление токена ----------
     private fun tryRefreshAndReconnect() {
-        if (isRefreshingToken) {
+        // Атомарно: только один поток пройдёт дальше
+        if (!isRefreshingToken.compareAndSet(false, true)) {
             MainActivity.appendLog("⏳ Уже идёт обновление токена, пропускаем")
             return
         }
@@ -257,6 +276,7 @@ class SmsGatewayService : Service() {
         val currentToken = tokenManager.getAccessToken()
         if (!tokenManager.isTokenExpired(currentToken)) {
             MainActivity.appendLog("ℹ️ Токен ещё действителен, переподключаемся без обновления")
+            isRefreshingToken.set(false)
             if (!WebSocketManager.getInstance().isConnected()) {
                 WebSocketManager.getInstance().resetState()
                 connectWebSocket()
@@ -265,13 +285,12 @@ class SmsGatewayService : Service() {
         }
 
         MainActivity.appendLog("🔄 Токен истёк, обновляем...")
-        isRefreshingToken = true
 
         Thread {
             val refreshOk = refreshToken()
             if (refreshOk) {
                 handler.post {
-                    isRefreshingToken = false
+                    isRefreshingToken.set(false)
                     reconnectAttempts = 0
                     MainActivity.appendLog("✅ Токен обновлён, переподключаемся")
                     WebSocketManager.getInstance().resetState()
@@ -285,7 +304,7 @@ class SmsGatewayService : Service() {
             val loginOk = performFullLogin()
 
             handler.post {
-                isRefreshingToken = false
+                isRefreshingToken.set(false)
                 if (loginOk) {
                     reconnectAttempts = 0
                     MainActivity.appendLog("✅ Автологин успешен, переподключаемся")
@@ -411,6 +430,7 @@ class SmsGatewayService : Service() {
     private fun cancelAllTimers() {
         cancelReconnect()
         tokenRefreshRunnable?.let { handler.removeCallbacks(it) }
+        wakeUpReconnectRunnable?.let { handler.removeCallbacks(it) }
         stopHealthCheck()
     }
 
@@ -422,7 +442,10 @@ class SmsGatewayService : Service() {
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "SmsGateway::WakeLock"
             )
-            wakeLock?.acquire(10 * 60 * 1000L)
+            // Держим wake-lock всё время работы сервиса (без таймаута).
+            // Release — в onDestroy. Foreground-сервис с уведомлением это допускает.
+            wakeLock?.acquire()
+            MainActivity.appendLog("🔋 WakeLock получен (без таймаута)")
         } else {
             MainActivity.appendLog("⚠️ Нет разрешения WAKE_LOCK")
         }
