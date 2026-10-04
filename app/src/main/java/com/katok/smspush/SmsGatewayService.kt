@@ -118,6 +118,12 @@ class SmsGatewayService : Service() {
                     stopSelf()
                     return START_NOT_STICKY
                 }
+                if (!hasSmsPermission()) {
+                    MainActivity.appendLog("⚠️ ВНИМАНИЕ: нет разрешения SEND_SMS")
+                    MainActivity.appendLog("➡️ Откройте MainActivity и предоставьте разрешение вручную")
+                } else {
+                    MainActivity.appendLog("✅ Разрешение SEND_SMS выдано")
+                }
                 MainActivity.appendLog("Сервис запущен")
                 requestBatteryOptimizationExemption()
                 connectWebSocket()
@@ -248,17 +254,37 @@ class SmsGatewayService : Service() {
     }
 
     private fun sendSms(phone: String, code: String): Boolean {
+        // Проверяем разрешение SEND_SMS перед отправкой
+        if (!hasSmsPermission()) {
+            MainActivity.appendLog("❌ Нет разрешения SEND_SMS! SMS не отправлена.")
+            MainActivity.appendLog("➡️ Откройте приложение шлюза и предоставьте разрешение.")
+            Log.e(TAG, "SEND_SMS permission is not granted")
+            return false
+        }
+
         return try {
             val smsManager = SmsManager.getDefault()
             val message = "Код подтверждения: $code"
             smsManager.sendTextMessage(phone, null, message, null, null)
             MainActivity.appendLog("📤 SMS отправлено на $phone")
             true
+        } catch (e: SecurityException) {
+            MainActivity.appendLog("❌ SecurityException: нет разрешения SEND_SMS")
+            Log.e(TAG, "SecurityException on sendSms", e)
+            false
         } catch (e: Exception) {
             MainActivity.appendLog("❌ Ошибка отправки SMS: ${e.message}")
             Log.e(TAG, "Failed to send SMS", e)
             false
         }
+    }
+
+    /**
+     * Проверяет, выдано ли приложению разрешение SEND_SMS.
+     */
+    private fun hasSmsPermission(): Boolean {
+        return checkSelfPermission(android.Manifest.permission.SEND_SMS) ==
+                PackageManager.PERMISSION_GRANTED
     }
 
     // ---------- Обновление токена ----------
