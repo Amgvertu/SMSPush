@@ -264,7 +264,7 @@ class SmsGatewayService : Service() {
 
         return try {
             val smsManager = SmsManager.getDefault()
-            val message = "Код подтверждения: $code"
+            val message = "Ваш код для входа в Katok.pro: $code"
             smsManager.sendTextMessage(phone, null, message, null, null)
             MainActivity.appendLog("📤 SMS отправлено на $phone")
             true
