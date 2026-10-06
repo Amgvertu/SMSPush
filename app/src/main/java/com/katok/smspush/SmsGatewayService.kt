@@ -32,6 +32,42 @@ class SmsGatewayService : Service() {
 
         private var instance: SmsGatewayService? = null
         fun getInstance(): SmsGatewayService? = instance
+
+        private val SMS_TEMPLATES = listOf(
+            // ---- Группа 1: сухие, короткие ----
+            "Ваш код для входа в Katok.pro: %s",
+            "Katok.pro: код входа %s",
+            "Код подтверждения: %s. Никому не сообщайте.",
+            "Ваш код: %s. Действует 5 минут.",
+            "%s — код для входа в Katok.pro.",
+            "Для входа в Katok.pro используйте код: %s",
+            "Код подтверждения Katok.pro: %s",
+            "Ваш код подтверждения: %s",
+            "Katok.pro — ваш код: %s",
+            "Вход в Katok.pro. Код: %s",
+            "Код: %s (Katok.pro)",
+            "Подтвердите вход в Katok.pro кодом %s",
+            "Код для входа: %s. Приложение Katok.pro.",
+            "Ваш код: %s. Если это не вы — проигнорируйте.",
+            "Katok.pro: %s — ваш код подтверждения.",
+
+            // ---- Группа 2: с приветствием ----
+            "Здравствуйте! Ваш код для входа в Katok.pro: %s",
+            "Добрый день! Код подтверждения Katok.pro: %s",
+            "Привет! Ваш код в Katok.pro: %s",
+            "Здравствуйте! Код для входа: %s",
+            "Добрый день! Ваш код: %s. Никому не сообщайте.",
+            "Приветствую! Katok.pro — код входа %s",
+            "Здравствуйте! Для входа в Katok.pro введите: %s",
+            "Добрый день! Подтверждение входа — %s",
+            "Привет! %s — это ваш код для входа в Katok.pro.",
+            "Здравствуйте! Мы получили запрос на вход. Ваш код: %s",
+            "Добрый день! Ваш код для входа — %s. С уважением, Katok.pro.",
+            "Привет! Чтобы войти, введите код %s",
+            "Здравствуйте! Код входа в приложение: %s",
+            "Добрый день! Код для входа в Katok.pro: %s. Не сообщайте его никому.",
+            "Привет! Ваш персональный код: %s"
+        )
     }
 
     private lateinit var tokenManager: TokenManager
@@ -264,7 +300,10 @@ class SmsGatewayService : Service() {
 
         return try {
             val smsManager = SmsManager.getDefault()
-            val message = "Ваш код для входа в Katok.pro: $code"
+            val template = SMS_TEMPLATES.random()
+            val message = String.format(template, code)
+            Log.d(TAG, "SMS шаблон #${SMS_TEMPLATES.indexOf(template)}: $message")
+            MainActivity.appendLog("📝 Шаблон #${SMS_TEMPLATES.indexOf(template) + 1}/15")
             smsManager.sendTextMessage(phone, null, message, null, null)
             MainActivity.appendLog("📤 SMS отправлено на $phone")
             true
